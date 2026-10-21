@@ -1,14 +1,13 @@
 # Data
 
-Raw CSV files are **not** committed (they are large and are listed in `.gitignore`).
+Raw CSV files are **not** committed (they are listed in `.gitignore` as they are too large).
 
 ## Source
 LBNL Fault Detection and Diagnostics Data Sets: Single Duct Air Handling Unit
 (Granderson et al., 2022). Download page given in the dataset documentation:
 https://fdd.hyperarts.com/dataset/simulated-sd-ahu/
 
-Check the DOI on the LBNL site before citing. The documentation PDF shows two
-slightly different DOIs (`10.25984/188132` and `10.25984/1881321`).
+
 
 ## Files used in this project
 Save these into this `data/` folder:

@@ -1,0 +1,62 @@
+{
+  "AHU_annual.csv": {
+    "n_rows": 525540,
+    "missing_values": {},
+    "constant_columns": [
+      "OA_Ls",
+      "SA_SPSPT_Pa",
+      "SA_TEMPSPT_C",
+      "SF_SPD"
+    ],
+    "out_of_range_0_1": {},
+    "n_occupied_rows": 278682
+  },
+  "oa_bias_2_annual.csv": {
+    "n_rows": 525540,
+    "missing_values": {},
+    "constant_columns": [
+      "OA_Ls",
+      "SA_SPSPT_Pa",
+      "SA_TEMPSPT_C",
+      "SF_SPD"
+    ],
+    "out_of_range_0_1": {},
+    "n_occupied_rows": 278640
+  },
+  "oa_bias_4_annual.csv": {
+    "n_rows": 525540,
+    "missing_values": {},
+    "constant_columns": [
+      "OA_Ls",
+      "SA_SPSPT_Pa",
+      "SA_TEMPSPT_C",
+      "SF_SPD"
+    ],
+    "out_of_range_0_1": {},
+    "n_occupied_rows": 278640
+  },
+  "oa_bias_-2_annual.csv": {
+    "n_rows": 525540,
+    "missing_values": {},
+    "constant_columns": [
+      "OA_Ls",
+      "SA_SPSPT_Pa",
+      "SA_TEMPSPT_C",
+      "SF_SPD"
+    ],
+    "out_of_range_0_1": {},
+    "n_occupied_rows": 278640
+  },
+  "oa_bias_-4_annual.csv": {
+    "n_rows": 525540,
+    "missing_values": {},
+    "constant_columns": [
+      "OA_Ls",
+      "SA_SPSPT_Pa",
+      "SA_TEMPSPT_C",
+      "SF_SPD"
+    ],
+    "out_of_range_0_1": {},
+    "n_occupied_rows": 278640
+  }
+}

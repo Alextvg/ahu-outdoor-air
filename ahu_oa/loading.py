@@ -54,7 +54,7 @@ def convert_to_si(df: pd.DataFrame) -> pd.DataFrame:
     return out.rename(columns=renames)
 
 
-def load_ahu_csv(path: str, time_col: str | None = None) -> pd.DataFrame:
+def load_ahu_csv(path: str, time_col: str | None = "Datetime") -> pd.DataFrame:
     """Read one AHU CSV file and return it in SI units.
 
     Args:

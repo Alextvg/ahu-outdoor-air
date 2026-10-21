@@ -37,6 +37,29 @@ def oa_fraction_from_temps(t_mixed, t_return, t_outdoor, min_delta: float = 3.0)
     return np.where(ok, (t_mixed - t_return) / safe, np.nan)
 
 
+def fraction_plausible(fraction, tol: float = 0.05):
+    """Flag outdoor air fractions that are physically possible.
+
+    A true fraction lies between 0 and 1. Values outside that range point to
+    sensor error, imperfect mixing or an ill-conditioned calculation. This
+    only flags: it never clips or removes values, so models can be scored on
+    all rows and the out-of-range share reported separately.
+
+    Args:
+        fraction: Outdoor air fraction (unitless), from any model.
+        tol: Allowed overshoot either side of 0 and 1, since sensor noise can
+            push a true fraction of 0.02 slightly negative. A tunable choice;
+            state it in the report and show how results change.
+
+    Returns:
+        Boolean numpy array, True where ``-tol <= fraction <= 1 + tol``.
+        NaN (for example ill-conditioned points) is returned as False.
+    """
+    f = np.asarray(fraction, dtype=float)
+    with np.errstate(invalid="ignore"):
+        return (f >= -tol) & (f <= 1.0 + tol)
+
+
 def oa_flow_from_fraction(fraction, supply_flow_ls):
     """Convert an outdoor air fraction into outdoor airflow (L/s).
 
