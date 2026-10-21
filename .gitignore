@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Editors / OS
+.vscode/
+.DS_Store
+
+# Large raw data (download instructions are in data/README.md)
+data/*.csv
+data/*.zip
+!data/sample/*.csv
