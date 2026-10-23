@@ -1,3 +1,4 @@
+"""Tests for the linearised regression of the outdoor air fraction on the damper."""
 import numpy as np
 import pandas as pd
 import pytest
@@ -24,6 +25,13 @@ def test_recovers_a_and_b():
     assert m.coefs["a"] == pytest.approx(0.1, abs=0.02)
     assert m.coefs["b"] == pytest.approx(0.5, abs=0.02)
     assert m.warnings() == []
+
+
+def test_standard_errors_are_positive_and_small():
+    m = regression.fit(synth())
+    assert 0 < m.stderr["a"] < 0.01
+    assert 0 < m.stderr["b"] < 0.01
+    assert m.rmse_K == pytest.approx(0.05, abs=0.01)   # equals the injected noise
 
 
 def test_recovers_fan_term():
@@ -53,8 +61,7 @@ def test_prediction_works_on_low_delta_row():
     m = regression.fit(df)
     low = df.iloc[:1].copy()
     low["OA_TEMP_C"] = low["RA_TEMP_C"]  # zero temperature difference
-    f = m.predict_fraction(low)
-    assert np.isfinite(f).all()
+    assert np.isfinite(m.predict_fraction(low)).all()
 
 
 def test_prediction_does_not_use_temperatures():
@@ -65,11 +72,20 @@ def test_prediction_does_not_use_temperatures():
     np.testing.assert_allclose(m.predict_fraction(df), m.predict_fraction(shifted))
 
 
-def test_predict_flow_multiplies_by_supply():
-    df = synth().head(5)
-    df["SA_Ls"] = 1000.0
+def test_prediction_matches_a_plus_b_damper():
+    df = synth().head(10)
     m = regression.fit(synth())
-    np.testing.assert_allclose(m.predict_flow(df), m.predict_fraction(df) * 1000.0)
+    expected = m.coefs["a"] + m.coefs["b"] * df["OA_DMPR_DM"].to_numpy()
+    np.testing.assert_allclose(m.predict_fraction(df), expected)
+
+
+def test_alternative_damper_column_is_used():
+    df = synth()
+    df["OA_DMPR"] = df["OA_DMPR_DM"]
+    df["OA_DMPR_DM"] = 0.5                      # command carries no information
+    m = regression.fit(df, damper_col="OA_DMPR")
+    assert m.damper_col == "OA_DMPR"
+    assert m.coefs["b"] == pytest.approx(0.5, abs=0.02)
 
 
 def test_well_conditioned_only_uses_fewer_rows():
@@ -78,6 +94,11 @@ def test_well_conditioned_only_uses_fewer_rows():
     flg = regression.fit(df, well_conditioned_only=True)
     assert flg.n_train < all_m.n_train
     assert flg.n_train == int(df["well_conditioned"].sum())
+
+
+def test_well_conditioned_only_needs_flag_column():
+    with pytest.raises(KeyError):
+        regression.fit(synth().drop(columns="well_conditioned"), well_conditioned_only=True)
 
 
 def test_missing_values_are_dropped_not_fatal():
@@ -99,6 +120,11 @@ def test_too_few_rows_raises():
 def test_negative_b_warns():
     m = regression.fit(synth(a=0.6, b=-0.3))
     assert any("not positive" in w for w in m.warnings())
+
+
+def test_fully_open_damper_above_one_warns():
+    m = regression.fit(synth(a=0.5, b=0.9))
+    assert any("exceeds 1" in w for w in m.warnings())
 
 
 def test_fan_signal_can_be_ignored_when_not_used():
