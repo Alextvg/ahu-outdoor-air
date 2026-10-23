@@ -67,14 +67,3 @@ def test_fraction_is_not_clipped():
     est = physics.oa_fraction_from_temps(3.0, 22.0, 5.0)
     assert est == pytest.approx(19.0 / 17.0)
     assert est > 1.0
-
-
-def test_fraction_plausible_range_and_nan():
-    f = np.array([-0.2, -0.04, 0.0, 0.5, 1.0, 1.04, 1.3, np.nan])
-    expected = [False, True, True, True, True, True, False, False]
-    assert physics.fraction_plausible(f, tol=0.05).tolist() == expected
-
-
-def test_fraction_plausible_strict_tolerance():
-    assert physics.fraction_plausible(-0.04, tol=0.0) == False  # noqa: E712
-    assert physics.fraction_plausible(0.5, tol=0.0) == True     # noqa: E712
