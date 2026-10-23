@@ -1,0 +1,3 @@
+rule,estimator,n_knots_chosen,n_knots_fitted,val_mae,monotone,max_decrease,share_decreasing,final
+quantile,cubic_spline_quantile_250,250,250,0.000995377244270343,False,8.013698177289363e-05,0.08227056764191047,False
+uniform,cubic_spline_uniform_120,120,120,0.0006557318350200506,False,0.009637160304371645,0.03075768942235559,True
