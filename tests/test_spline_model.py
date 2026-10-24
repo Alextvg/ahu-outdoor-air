@@ -149,12 +149,15 @@ def test_tolerance_picks_the_simplest_curve_that_is_nearly_as_good():
     cands = (10, 20, 60, 120, 250)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        lowest, table = spline_model.select_n_knots(train, val, "OA_DMPR", cands, tolerance=0.0)
-        loose, _ = spline_model.select_n_knots(train, val, "OA_DMPR", cands, tolerance=0.10)
-        anything, _ = spline_model.select_n_knots(train, val, "OA_DMPR", cands, tolerance=100.0)
+        lowest, table = spline_model.select_n_knots(train, val, "OA_DMPR", cands, tolerance=0.0,
+                                                 abs_tolerance=0.0)
+        loose, _ = spline_model.select_n_knots(train, val, "OA_DMPR", cands, tolerance=0.10, abs_tolerance=0.0)
+        anything, _ = spline_model.select_n_knots(train, val, "OA_DMPR", cands, tolerance=100.0, abs_tolerance=0.0)
     assert lowest == int(table.loc[table["val_mae"].idxmin(), "n_knots"])
     assert loose <= lowest
-    assert anything == 10                             # everything is within a huge tolerance
+    # everything is within a huge tolerance, so the smallest local minimum wins
+    minima = table.loc[spline_model.local_minima(table["val_mae"].to_numpy()), "n_knots"]
+    assert anything == int(minima.min())
 
 
 def test_negative_tolerance_raises():
@@ -266,69 +269,80 @@ def test_select_n_knots_works_for_the_monotone_variant():
     assert table["val_mae"].notna().all()
 
 
-# ---- minimum row guard -----------------------------------------------------------------
+# ---- local-minimum knot selection ----------------------------------------------------
 
-def gappy_with_transients(n=20000, seed=0):
-    """Linear damper = f, with every real row removed from f in [0.45, 0.55] and four
-    transient rows (damper 0.1, f ~ 0.5) left alone in that gap."""
-    r = np.random.default_rng(seed)
-    f = r.uniform(0.0, 1.0, n)
-    f = f[(f < 0.45) | (f > 0.55)]
-    df = pd.DataFrame({"f_phys": f, "OA_DMPR": f, "well_conditioned": True})
-    odd = pd.DataFrame({"f_phys": [0.499, 0.500, 0.501, 0.502], "OA_DMPR": 0.1, "well_conditioned": True})
-    return pd.concat([df, odd], ignore_index=True)
+def test_local_minima_flags_dips_and_ends():
+    v = [5.0, 3.0, 4.0, 2.0, 2.5, 1.0]
+    assert list(spline_model.local_minima(v)) == [False, True, False, True, False, True]
+    assert list(spline_model.local_minima([1.0, 2.0, 3.0])) == [True, False, False]   # rising
+    assert list(spline_model.local_minima([3.0, 2.0, 1.0])) == [False, False, True]   # falling
 
 
-def test_guard_removes_a_bin_taken_over_by_transient_rows():
-    df = gappy_with_transients()
-    bad = spline_model.fit_spline(df, "OA_DMPR", n_knots=50, rule="uniform", min_bin_rows=0)
-    good = spline_model.fit_spline(df, "OA_DMPR", n_knots=50, rule="uniform", min_bin_rows=15)
-    assert abs(bad.predict(0.5) - 0.5) > 0.2            # the 4 transient rows pull a knot to 0.1
-    assert abs(good.predict(0.5) - 0.5) < 0.05          # spline interpolates across the gap instead
-    assert good.params["bins_dropped"] >= 1 and bad.params["bins_dropped"] == 0
+def test_local_minima_ignores_nan_and_handles_all_nan():
+    v = [4.0, np.nan, 2.0, 3.0]
+    assert list(spline_model.local_minima(v)) == [False, False, True, False]
+    assert not spline_model.local_minima([np.nan, np.nan]).any()
 
 
-def test_guard_works_for_the_monotone_variant_too():
-    df = gappy_with_transients()
-    good = spline_model.fit_spline(df, "OA_DMPR", 50, "uniform", monotone=True, min_bin_rows=15)
-    assert abs(good.predict(0.5) - 0.5) < 0.05
+def _patch_scores(monkeypatch, maes):
+    """Make fit_spline/predict produce the given validation MAE for each candidate."""
+    cands = list(maes)
+
+    def fake_fit(train, col, n_knots, rule="quantile", monotone=False):
+        return spline_model.SplineEstimator("x", "spline", {"mae": maes[n_knots]}, 1)
+
+    monkeypatch.setattr(spline_model, "fit_spline", fake_fit)
+    monkeypatch.setattr(spline_model.SplineEstimator, "predict",
+                        lambda self, f: np.asarray(f, float) + self.params["mae"])
+    val = pd.DataFrame({"f_phys": np.zeros(10), "OA_DMPR": np.zeros(10), "well_conditioned": True})
+    return cands, val
 
 
-def test_guard_zero_keeps_every_bin_and_records_settings():
-    est = spline_model.fit_spline(curved(), "OA_DMPR", n_knots=20)
-    assert est.params["min_bin_rows"] == 0 and est.params["bins_dropped"] == 0
-    assert len(est.params["rows"]) == len(est.params["x"])
-    assert sum(est.params["rows"]) == est.n_train
+def test_selects_smaller_local_minimum_when_nearly_as_good(monkeypatch):
+    # Shape of the real curve: dip at 20, bump, then a deeper minimum at 120 / 250.
+    maes = {10: 0.0019, 20: 0.00112, 30: 0.00127, 60: 0.0015, 120: 0.00066, 250: 0.00071}
+    cands, val = _patch_scores(monkeypatch, maes)
+    k, table = spline_model.select_n_knots(None, val, "OA_DMPR", cands, abs_tolerance=0.0005)
+    assert k == 20
+    assert table.loc[table["n_knots"] == 20, "eligible"].iloc[0]
+    assert table.loc[table["n_knots"] == 120, "local_min"].iloc[0]
 
 
-def test_every_kept_knot_has_at_least_the_guard_rows():
-    df = curved(n=6000)
-    est = spline_model.fit_spline(df, "OA_DMPR", n_knots=100, rule="uniform", min_bin_rows=30)
-    assert min(est.params["rows"]) >= 30
+def test_zero_tolerances_give_the_plain_lowest_error(monkeypatch):
+    maes = {10: 0.0019, 20: 0.00112, 30: 0.00127, 60: 0.0015, 120: 0.00066, 250: 0.00071}
+    cands, val = _patch_scores(monkeypatch, maes)
+    k, _ = spline_model.select_n_knots(None, val, "OA_DMPR", cands, tolerance=0.0, abs_tolerance=0.0)
+    assert k == 120
 
 
-def test_guard_barely_changes_quantile_bins():
-    # Equal-count bins all hold many rows, so a small guard removes nothing.
-    df = curved(n=6000)
-    a = spline_model.fit_spline(df, "OA_DMPR", n_knots=20, rule="quantile", min_bin_rows=0)
-    b = spline_model.fit_spline(df, "OA_DMPR", n_knots=20, rule="quantile", min_bin_rows=15)
-    assert b.params["bins_dropped"] == 0
-    np.testing.assert_allclose(a.params["y"], b.params["y"])
+
+def test_falling_curve_warns_that_the_dip_may_be_beyond_the_grid(monkeypatch):
+    maes = {10: 0.003, 20: 0.002, 30: 0.001}
+    cands, val = _patch_scores(monkeypatch, maes)
+    with pytest.warns(UserWarning, match="edge"):
+        spline_model.select_n_knots(None, val, "OA_DMPR", cands)
 
 
-def test_guard_invalid_values_raise():
-    df = curved()
-    with pytest.raises(ValueError):
-        spline_model.fit_spline(df, "OA_DMPR", n_knots=10, min_bin_rows=-1)
-    with pytest.raises(ValueError):                      # every bin removed
-        spline_model.fit_spline(df, "OA_DMPR", n_knots=10, min_bin_rows=10**6)
-
-
-def test_select_n_knots_passes_the_guard_through():
-    df = gappy_with_transients()
-    train, val = df.iloc[::2], df.iloc[1::2]
+def test_chosen_is_a_local_minimum_within_tolerance_on_real_fits():
+    df = curved(n=8000)
+    train, val = df.iloc[:6000], df.iloc[6000:]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        n, table = spline_model.select_n_knots(train, val, "OA_DMPR", (10, 30, 60), rule="uniform",
-                                                min_bin_rows=15)
-    assert n in (10, 30, 60) and table["val_mae"].notna().any()
+        k, table = spline_model.select_n_knots(train, val, "OA_DMPR", (6, 10, 20, 60, 120, 250))
+    row = table.loc[table["n_knots"] == k].iloc[0]
+    assert row["local_min"] and row["within_tolerance"] and row["eligible"]
+
+
+def test_negative_abs_tolerance_raises():
+    df = curved(n=8000)
+    with pytest.raises(ValueError):
+        spline_model.select_n_knots(df.iloc[:6000], df.iloc[6000:], "OA_DMPR", abs_tolerance=-1.0)
+
+
+def test_fit_records_rows_and_has_no_guard_parameters():
+    est = spline_model.fit_spline(curved(), "OA_DMPR", n_knots=20)
+    assert len(est.params["rows"]) == len(est.params["x"])
+    assert sum(est.params["rows"]) == est.n_train
+    assert "min_bin_rows" not in est.params
+    with pytest.raises(TypeError):
+        spline_model.fit_spline(curved(), "OA_DMPR", n_knots=20, min_bin_rows=5)

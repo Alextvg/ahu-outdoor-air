@@ -21,13 +21,12 @@ in each bin) and then joins the knots with a PCHIP spline (piecewise cubic Hermi
 interpolation). PCHIP chooses each knot's slope so that the curve never overshoots
 or reverses between knots, so the result is smooth and monotone by construction.
 
-Minimum row guard (``min_bin_rows``): the bin median only resists the transient rows
-(damper back at its minimum while ``f`` is still high) when the bin holds many rows.
-A sparse bin can be taken over by a handful of transient rows, giving a knot far off
-the curve. Bins with fewer than ``min_bin_rows`` rows are therefore dropped before the
-spline is fitted, and the spline interpolates across the gap they leave. The guard
-matters mainly for equal-width (``uniform``) bins; equal-count (``quantile``) bins all
-hold many rows, so it rarely triggers there.
+Knot-count selection: the validation error usually falls steeply, then flattens and
+wobbles. The absolute minimum often sits at the largest candidates, where the gain over a
+much smaller count is tiny and the curve has far more freedom to follow noise. The
+selection therefore looks at the shape of the error curve: it finds the local minima of
+the validation MAE over the candidate counts, and takes the smallest local minimum whose
+error is close enough to the best (see :func:`select_n_knots`).
 
 Outside the range of training fractions the prediction is held flat at the end
 knot, and predictions are limited to the range of the knot positions. The cubic
@@ -56,6 +55,9 @@ KNOT_RULES = ("quantile", "uniform")
 # curve to follow the S-shape without every bin holding only a few rows.
 DEFAULT_KNOT_CANDIDATES = (6, 10, 15, 20, 30, 45, 60, 90, 120, 180, 250)
 UNIFORM_TRIM = (0.5, 99.5)  # percentiles bounding the uniform knot range
+# Margin (damper units) within which a local minimum counts as "as good as the best".
+# 0.0005 is 0.05 percentage points of damper travel, far below sensor resolution.
+DEFAULT_ABS_TOLERANCE = 0.0005
 
 
 @dataclass
@@ -66,9 +68,8 @@ class SplineEstimator:
         name: Label used in result tables.
         kind: Always ``"spline"``.
         params: ``{"x": knot fractions, "y": knot positions, "n_knots": requested
-            number of bins, "rule": knot rule, "monotone": bool, "min_bin_rows": the
-            guard used, "bins_dropped": bins removed by it, "rows": rows behind each
-            knot}``. ``x`` is
+            number of bins, "rule": knot rule, "monotone": bool, "rows": rows behind
+            each knot}``. ``x`` is
             strictly increasing, and ``y`` is non-decreasing when ``monotone``. The
             actual number of knots can be smaller than ``n_knots`` if bins merge.
         n_train: Rows used in the fit.
@@ -115,7 +116,6 @@ def fit_spline(
     n_knots: int = 20,
     rule: str = "quantile",
     monotone: bool = False,
-    min_bin_rows: int = 0,
 ) -> SplineEstimator:
     """Fit the spline ``damper = g(f_phys)``.
 
@@ -131,22 +131,18 @@ def fit_spline(
         monotone: If False, a natural cubic spline through the bin medians. If True,
             isotonic regression on the knot positions, then a PCHIP spline, so the
             estimated position never decreases as ``f`` increases.
-        min_bin_rows: Bins with fewer rows than this are dropped before fitting (0
-            keeps every bin). See the module docstring.
 
     Returns:
         A :class:`SplineEstimator`.
 
     Raises:
-        ValueError: On an unknown ``rule``, ``n_knots < 3``, a negative
-            ``min_bin_rows``, or when fewer than 3 distinct knots remain.
+        ValueError: On an unknown ``rule``, ``n_knots < 3``, or when fewer
+            than 3 distinct knots remain.
     """
     if rule not in KNOT_RULES:
         raise ValueError(f"unknown rule {rule!r}; use one of {KNOT_RULES}")
     if n_knots < 3:
         raise ValueError("n_knots must be at least 3")
-    if min_bin_rows < 0:
-        raise ValueError("min_bin_rows must not be negative")
     d = train[train["well_conditioned"]][["f_phys", damper_col]].dropna()
     if len(d) < 3 * n_knots:
         raise ValueError(f"need at least {3 * n_knots} rows for {n_knots} knots, got {len(d)}")
@@ -160,9 +156,6 @@ def fit_spline(
                .groupby("bin")
                .agg(x=("f", "median"), y=("y", "median"), w=("f", "size"))
                .reset_index(drop=True))
-    n_bins = len(per_bin)
-    per_bin = per_bin[per_bin["w"] >= min_bin_rows]      # minimum row guard
-    n_dropped = n_bins - len(per_bin)
     # Bins with an identical median f would give a repeated knot: merge them,
     # weighting their positions by row count.
     per_bin["wy"] = per_bin["y"] * per_bin["w"]
@@ -182,9 +175,33 @@ def fit_spline(
         name=f"{label}_{rule}_{len(x_k)}", kind="spline",
         params={"x": [float(v) for v in x_k], "y": [float(v) for v in y_k],
                 "n_knots": int(n_knots), "rule": rule, "monotone": bool(monotone),
-                "min_bin_rows": int(min_bin_rows), "bins_dropped": int(n_dropped),
                 "rows": [int(v) for v in knots["w"].to_numpy()]},
         n_train=len(d))
+
+
+def local_minima(values) -> np.ndarray:
+    """Flag the local minima of a sequence, ignoring NaN entries.
+
+    A value is a local minimum when it is no larger than its nearest finite neighbour on
+    each side. The two ends are compared with their single neighbour, so the last point of
+    a curve that is still falling counts, which makes the global minimum always a local one.
+
+    Args:
+        values: Sequence of numbers (NaN for candidates that could not be scored).
+
+    Returns:
+        Boolean array, same length as ``values``; False wherever the value is NaN.
+    """
+    v = np.asarray(values, dtype=float)
+    flag = np.zeros(v.shape, dtype=bool)
+    idx = np.flatnonzero(np.isfinite(v))
+    if idx.size == 0:
+        return flag
+    f = v[idx]
+    left = np.r_[np.inf, f[:-1]]
+    right = np.r_[f[1:], np.inf]
+    flag[idx] = (f <= left) & (f <= right)
+    return flag
 
 
 def select_n_knots(
@@ -195,48 +212,54 @@ def select_n_knots(
     rule: str = "quantile",
     tolerance: float = 0.05,
     monotone: bool = False,
-    min_bin_rows: int = 0,
+    abs_tolerance: float = DEFAULT_ABS_TOLERANCE,
 ) -> tuple[int, pd.DataFrame]:
-    """Choose the number of knots by the error on the validation block.
+    """Choose the number of knots from the shape of the validation error curve.
 
-    For each candidate, fit the spline on ``train`` and score it on ``val``. The
-    error usually falls quickly and then flattens, so the lowest error alone tends
-    to pick the largest candidate for a negligible gain. The chosen count is the
-    smallest one whose validation MAE is within ``tolerance`` of the best, which is
-    the simplest curve that is almost as accurate. The test block and the stuck
-    files are not used here, so the final results are not tuned to them.
+    For each candidate, fit the spline on ``train`` and score it on ``val``. The lowest
+    error alone tends to land on the largest candidate for a very small gain. Instead:
+
+    1. Find the local minima of the validation MAE over the candidate counts.
+    2. Call a minimum good enough if its MAE is within ``tolerance`` (relative) or
+       ``abs_tolerance`` (damper units) of the best MAE, whichever margin is larger.
+    3. Take the smallest good-enough local minimum: the simplest curve that sits at a
+       genuine dip in the error and performs nearly as well as the best.
+
+    The absolute margin matters because the errors here are tiny (about 0.001 of the damper
+    range), so a relative margin of 5% is far below anything physically meaningful. The
+    global minimum is always a local minimum and always good enough, so a choice always
+    exists. With ``tolerance=0`` and ``abs_tolerance=0`` the result is the plain lowest
+    error. The test block and the stuck files are not used here.
 
     Args:
         train: Training dataframe (see :func:`fit_spline`).
         val: Validation dataframe with ``f_phys``, ``well_conditioned`` and
             ``damper_col``. Only well-conditioned rows are scored.
         damper_col: Column holding the true damper position.
-        candidates: Knot counts to try.
+        candidates: Knot counts to try, in increasing order.
         rule: Knot rule passed to :func:`fit_spline`.
-        tolerance: Relative margin over the lowest MAE that still counts as good
-            enough (0.05 is 5%). Use 0 for the plain lowest-error choice.
+        tolerance: Relative margin over the lowest MAE (0.05 is 5%).
         monotone: Passed to :func:`fit_spline` (monotone PCHIP or cubic spline).
-        min_bin_rows: Passed to :func:`fit_spline` (minimum row guard).
+        abs_tolerance: Absolute margin over the lowest MAE, in damper units.
 
     Returns:
         Tuple ``(chosen_n_knots, table)``. ``table`` has one row per candidate with
-        its validation MAE, the number of rows scored (NaN MAE if the fit failed)
-        and ``within_tolerance``. A warning is issued if the chosen count is the
-        smallest or largest that could be fitted, since the flat part of the error
-        curve may then lie outside the grid.
+        ``n_knots``, ``val_mae``, ``n_scored`` (NaN MAE if the fit failed),
+        ``local_min`` (a dip in the error curve), ``within_tolerance`` (close enough to
+        the best) and ``eligible`` (both). A warning is issued if the chosen count is the
+        smallest or largest that could be fitted, since the dip may then lie outside the grid.
 
     Raises:
-        ValueError: If no candidate could be fitted and scored, or ``tolerance < 0``.
+        ValueError: If no candidate could be fitted and scored, or a tolerance is negative.
     """
-    if tolerance < 0:
-        raise ValueError("tolerance must not be negative")
+    if tolerance < 0 or abs_tolerance < 0:
+        raise ValueError("tolerance and abs_tolerance must not be negative")
     held = val[val["well_conditioned"]]
     truth = held[damper_col].to_numpy(float)
     rows = []
     for k in candidates:
         try:
-            est = fit_spline(train, damper_col, n_knots=k, rule=rule, monotone=monotone,
-                             min_bin_rows=min_bin_rows)
+            est = fit_spline(train, damper_col, n_knots=k, rule=rule, monotone=monotone)
         except ValueError:
             rows.append({"n_knots": k, "val_mae": np.nan, "n_scored": 0})
             continue
@@ -247,9 +270,12 @@ def select_n_knots(
     table = pd.DataFrame(rows)
     if table["val_mae"].isna().all():
         raise ValueError("no candidate could be scored; check the data and candidates")
-    limit = table["val_mae"].min() * (1.0 + tolerance)
+    best = table["val_mae"].min()
+    limit = max(best * (1.0 + tolerance), best + abs_tolerance)
+    table["local_min"] = local_minima(table["val_mae"].to_numpy())
     table["within_tolerance"] = table["val_mae"] <= limit
-    chosen = int(table.loc[table["within_tolerance"], "n_knots"].min())
+    table["eligible"] = table["local_min"] & table["within_tolerance"]
+    chosen = int(table.loc[table["eligible"], "n_knots"].min())
     fitted = table.dropna(subset=["val_mae"])["n_knots"]
     if len(fitted) > 1 and chosen in (fitted.min(), fitted.max()):
         warnings.warn(f"chosen knot count {chosen} is at the edge of the candidates "

@@ -1,32 +1,31 @@
 """Fit and validate the spline damper estimators: position = g(f).
 
-Two spline variants are fitted and compared (see ``ahu_oa.spline_model``): the natural
-cubic spline, and the monotone spline (isotonic regression on the knot positions, then
-PCHIP), whose estimated position can never fall as ``f`` rises.
+Baseline: the natural cubic spline. Alternative: the monotone spline (isotonic regression
+on the knot positions, then PCHIP), whose estimated position can never fall as ``f`` rises
+(see ``ahu_oa.spline_model``). Both are compared on identical data and splits.
 
 Run from the project root (audit first, see ``scripts/run_damper_audit.py``):
 
     python -m scripts.run_spline_model
-    python -m scripts.run_spline_model --variants monotone --rules uniform
-    python -m scripts.run_spline_model --rules quantile --tolerance 0
-    python -m scripts.run_spline_model --min-delta 2 --knots 10 20 40 80
-    python -m scripts.run_spline_model --min-bin-rows 30
+    python -m scripts.run_spline_model --rules uniform
+    python -m scripts.run_spline_model --abs-tolerance 0.001 --tolerance 0.05
+    python -m scripts.run_spline_model --abs-tolerance 0 --tolerance 0     # plain lowest error
 
 What it does
   1. Loads the fault-free file (fan on, settled, complete rows), computes the
      outdoor air fraction f from the three temperatures, and splits the rows
      into train / validation / test blocks in time (``config.SPLIT_METHOD``).
-  2. For each variant (``cubic``, ``monotone``) and knot rule (``quantile`` = equal
-     rows per bin, ``uniform`` = equal width bins) chooses the number of knots on the
-     VALIDATION block, using ``spline_model.select_n_knots``, then fits the spline on
-     the TRAIN block. ``--min-bin-rows`` drops sparse bins before fitting.
-  3. Keeps the spline with the lowest validation MAE as the final one. By default only
-     splines whose curve passes the monotone check are eligible (a more open damper
-     cannot give a lower fraction), so a cubic spline with a dip cannot be final;
-     ``--allow-non-monotone-final`` removes that restriction.
-  4. Scores the splines and the two existing estimators (inverted linear,
-     direct polynomial) on the validation block, the test block, and every
-     stuck-damper file against its known position.
+  2. For each method (``cubic`` baseline, ``monotone`` alternative) and knot rule
+     (``quantile`` = equal rows per bin, ``uniform`` = equal width bins) chooses the
+     number of knots on the VALIDATION block, then fits the spline on the TRAIN block.
+     The knot count is NOT the absolute minimum of the validation error: it is the
+     smallest local minimum of the error curve whose error is within ``--tolerance``
+     (relative) or ``--abs-tolerance`` (damper units) of the best. This avoids paying for
+     a very large knot count when a much smaller one is almost as accurate.
+  3. For each method, keeps the rule with the lowest validation MAE as that method's final.
+  4. Scores every fitted spline on the validation block, the test block, and every
+     stuck-damper file against its known position, and writes a baseline-versus-alternative
+     comparison.
 
 Honest-validation notes (also printed at the end)
   * The validation block is used to choose the knot count and the rule, so the
@@ -60,12 +59,13 @@ import pandas as pd
 from matplotlib.figure import Figure
 
 import config
-from ahu_oa import damper_model, spline_model, splits
+from ahu_oa import spline_model, splits
 from scripts.run_damper_model import (make_fault_free_figure, make_stuck_figure,
                                       prepare, score_estimator, stuck_detail)
 
 BIN_WIDTH = 0.05
-VARIANTS = ("cubic", "monotone")
+VARIANTS = ("cubic", "monotone")      # baseline, alternative
+BASELINE, ALTERNATIVE = VARIANTS
 
 
 def monotone_check(est, n: int = 4000) -> dict:
@@ -117,7 +117,7 @@ def error_by_bin(block: pd.DataFrame, estimators, col: str, width: float = BIN_W
     return pd.DataFrame(rows)
 
 
-def make_curve_figure(train: pd.DataFrame, estimators, final_name: str,
+def make_curve_figure(train: pd.DataFrame, estimators, final_names,
                       stuck_points, col: str) -> Figure:
     """Fault-free training data (f on x, position on y) with every fitted curve.
 
@@ -138,11 +138,11 @@ def make_curve_figure(train: pd.DataFrame, estimators, final_name: str,
     grid = np.linspace(f_lo, f_hi, 500)
     styles = ["--", ":", "-", "-."]
     for i, e in enumerate(estimators):
-        final = e.name == final_name
+        final = e.name in final_names
         ax.plot(grid, e.predict(grid), styles[i % len(styles)], linewidth=2.6 if final else 1.4,
                 label=e.name + (" (final)" if final else ""))
         if e.kind == "spline" and final:
-            ax.plot(e.params["x"], e.params["y"], "o", color="k", markersize=3, label="spline knots")
+            ax.plot(e.params["x"], e.params["y"], "o", markersize=3, label=f"knots of {e.name}")
     for case, pos, f_med in stuck_points:
         ax.plot(f_med, pos, "*", color="red", markersize=14, markeredgecolor="k")
         ax.annotate(f"stuck {pos:g}", (f_med, pos), textcoords="offset points", xytext=(6, -12),
@@ -159,7 +159,7 @@ def make_curve_figure(train: pd.DataFrame, estimators, final_name: str,
     return fig
 
 
-def make_zoom_figure(train: pd.DataFrame, estimators, final_name: str, col: str,
+def make_zoom_figure(train: pd.DataFrame, estimators, final_names, col: str,
                      f_max: float = 0.25) -> Figure:
     """Fault-free training data and every curve for small ``f`` only.
 
@@ -177,7 +177,7 @@ def make_zoom_figure(train: pd.DataFrame, estimators, final_name: str, col: str,
     for e in estimators:
         if e.kind != "spline":
             continue
-        final = e.name == final_name
+        final = e.name in final_names
         ax.plot(grid, e.predict(grid), "-" if e.params.get("monotone") else "--",
                 linewidth=2.6 if final else 1.3, label=e.name + (" (final)" if final else ""))
     ax.set_xlim(-0.01, f_max)
@@ -202,8 +202,7 @@ def comparison_table(metrics_df: pd.DataFrame, summary_df: pd.DataFrame, selecte
         stuck_cases: Stuck-case labels to include as columns.
 
     Returns:
-        Dataframe with ``estimator``, ``monotone`` (curve passes the check; baselines are
-        left blank), ``test_mae``, ``<case>_mae`` and ``<case>_median`` for each case.
+        Dataframe with ``estimator``, ``monotone`` (curve passes the check), ``test_mae``, ``<case>_mae`` and ``<case>_median`` for each case.
         MAE is in damper units on well-conditioned rows; ``test_mae`` is the honest
         fault-free number (the validation block was used for tuning).
     """
@@ -248,8 +247,6 @@ def main(argv=None) -> int:
     parser.add_argument("--data-dir", type=Path, default=config.DATA_DIR)
     parser.add_argument("--min-delta", type=float, default=config.MIN_DELTA_K)
     parser.add_argument("--settle", default=config.SETTLE)
-    parser.add_argument("--degree", type=int, default=config.DIRECT_POLY_DEGREE,
-                        help="degree of the direct polynomial baseline")
     parser.add_argument("--tol", type=float, default=config.POSITION_TOL,
                         help="stuck-file agreement tolerance (damper units)")
     parser.add_argument("--rules", nargs="+", default=list(spline_model.KNOT_RULES),
@@ -257,17 +254,21 @@ def main(argv=None) -> int:
     parser.add_argument("--variants", nargs="+", default=list(VARIANTS), choices=list(VARIANTS),
                         help="spline variants to fit: cubic (natural cubic spline) and/or "
                              "monotone (isotonic knots + PCHIP)")
-    parser.add_argument("--min-bin-rows", type=int,
-                        default=getattr(config, "SPLINE_MIN_BIN_ROWS", 0),
-                        help="drop bins with fewer rows than this before fitting (0 keeps "
-                             "all); default from config.SPLINE_MIN_BIN_ROWS if set")
-    parser.add_argument("--allow-non-monotone-final", action="store_true",
-                        help="let a spline whose curve falls somewhere be the final one")
+    parser.add_argument("--show-knots", nargs="+", type=int, default=[45, 250],
+                        help="fixed uniform-knot counts drawn on the curve figures for both "
+                             "the cubic and the monotone spline")
+    parser.add_argument("--figure-knots", type=int, default=45,
+                        help="uniform-knot count of the cubic and monotone splines used for the "
+                             "fault-free test and stuck-file figures")
     parser.add_argument("--knots", nargs="+", type=int,
                         default=list(spline_model.DEFAULT_KNOT_CANDIDATES),
                         help="knot counts to try")
     parser.add_argument("--tolerance", type=float, default=0.05,
-                        help="knot choice: smallest count within this share of the best val MAE")
+                        help="knot choice: a local minimum is good enough if its val MAE is "
+                             "within this share of the best (relative margin)")
+    parser.add_argument("--abs-tolerance", type=float, default=spline_model.DEFAULT_ABS_TOLERANCE,
+                        help="knot choice: ... or within this many damper units of the best "
+                             "(the larger of the two margins applies)")
     args = parser.parse_args(argv)
 
     config.TABLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -291,38 +292,52 @@ def main(argv=None) -> int:
     train, val, test = parts["train"], parts["val"], parts["test"]
     print(f"[ok] split ({config.SPLIT_METHOD}): train {len(train)}, val {len(val)}, test {len(test)} rows")
 
-    # ---- baselines and splines (all fitted on the train block only)
-    baselines = [damper_model.fit_inverted(train, col),
-                 damper_model.fit_direct(train, col, args.degree)]
+    # ---- baseline (cubic) and alternative (monotone) splines, fitted on the train block only
     splines, sel_tables, selected = {}, [], []
     for variant in args.variants:
         for rule in args.rules:
-            mono = variant == "monotone"
+            mono = variant == ALTERNATIVE
             k, table = spline_model.select_n_knots(
                 train, val, col, candidates=tuple(args.knots), rule=rule,
-                tolerance=args.tolerance, monotone=mono, min_bin_rows=args.min_bin_rows)
-            est = spline_model.fit_spline(train, col, n_knots=k, rule=rule, monotone=mono,
-                                          min_bin_rows=args.min_bin_rows)
+                tolerance=args.tolerance, monotone=mono, abs_tolerance=args.abs_tolerance)
+            est = spline_model.fit_spline(train, col, n_knots=k, rule=rule, monotone=mono)
             sel_tables.append(table.assign(variant=variant, rule=rule,
                                            chosen=table["n_knots"] == k))
             val_mae = float(table.loc[table["n_knots"] == k, "val_mae"].iloc[0])
+            best_row = table.loc[table["val_mae"].idxmin()]
+            minima = table.loc[table["local_min"], "n_knots"].tolist()
             selected.append({"variant": variant, "rule": rule, "estimator": est.name,
                              "n_knots_chosen": k, "n_knots_fitted": len(est.params["x"]),
-                             "min_bin_rows": args.min_bin_rows,
-                             "bins_dropped": est.params.get("bins_dropped", 0),
-                             "val_mae": val_mae, **monotone_check(est)})
+                             "val_mae": val_mae,
+                             "lowest_val_mae_knots": int(best_row["n_knots"]),
+                             "lowest_val_mae": float(best_row["val_mae"]),
+                             "val_mae_cost": val_mae - float(best_row["val_mae"]),
+                             "local_minima": " ".join(str(m) for m in minima),
+                             **monotone_check(est)})
             splines[(variant, rule)] = est
     sel_df = pd.concat(sel_tables, ignore_index=True)
     selected_df = pd.DataFrame(selected)
-    eligible = selected_df if args.allow_non_monotone_final else selected_df[selected_df["monotone"]]
-    if eligible.empty:
-        print("[note] no fitted spline passes the monotone check; choosing among all of them")
-        eligible = selected_df
-    final_idx = eligible["val_mae"].idxmin()
-    selected_df["final"] = selected_df.index == final_idx
-    final = splines[(selected_df.loc[final_idx, "variant"], selected_df.loc[final_idx, "rule"])]
-    estimators = baselines + list(splines.values())
-    spline_names = {e.name for e in splines.values()}
+    # one final spline per method: the rule with the lowest validation MAE
+    finals = {}
+    for variant in args.variants:
+        g = selected_df[selected_df["variant"] == variant]
+        finals[variant] = g["val_mae"].idxmin()
+    selected_df["final"] = selected_df.index.isin(list(finals.values()))
+    final_est = {v: splines[(selected_df.loc[i, "variant"], selected_df.loc[i, "rule"])]
+                 for v, i in finals.items()}
+    # fixed uniform-knot splines (e.g. 45 and 250) for the curve figures, fitted on train only
+    fixed = []
+    for v in args.variants:
+        for k in args.show_knots:
+            fixed.append(spline_model.fit_spline(train, col, n_knots=k, rule="uniform",
+                                                 monotone=v == ALTERNATIVE))
+    # the splines drawn in the fault-free test and stuck-file figures: uniform knots, fixed count
+    figure_est = {v: spline_model.fit_spline(train, col, n_knots=args.figure_knots, rule="uniform",
+                                             monotone=v == ALTERNATIVE) for v in args.variants}
+    estimators = list(splines.values()) + [e for e in fixed if e.name not in
+                                           {s_.name for s_ in splines.values()}]
+    final_list = [final_est[v] for v in args.variants]
+    spline_names = {e.name for e in estimators}
 
     # ---- fault-free validation and test blocks
     metric_rows = []
@@ -358,8 +373,9 @@ def main(argv=None) -> int:
         f_wc = df.loc[df["well_conditioned"], "f_phys"].dropna()
         if len(f_wc):
             stuck_points.append((case, float(position), float(f_wc.median())))
-        make_stuck_figure(case, final, df, position, args.min_delta).savefig(
-            config.FIGURES_DIR / f"spline_stuck_{case}.png", dpi=150)
+        for v, e in figure_est.items():
+            make_stuck_figure(case, e, df, position, args.min_delta).savefig(
+                config.FIGURES_DIR / f"spline_stuck_{case}_{v}.png", dpi=150)
         print(f"[ok] {case}: {rep['n_complete']} fan-on settled rows")
 
     metrics_df = pd.DataFrame(metric_rows)
@@ -378,23 +394,29 @@ def main(argv=None) -> int:
     summary_df.to_csv(t / "spline_model_stuck_summary.csv", index=False)
     month_df.to_csv(t / "spline_model_stuck_by_month.csv", index=False)
     bins_df.to_csv(t / "spline_model_error_by_bin.csv", index=False)
-    make_curve_figure(train, estimators, final.name, stuck_points, col).savefig(
+    final_names = set()          # curve figures show the fixed uniform splines, none emphasised
+    make_curve_figure(train, fixed, final_names, stuck_points, col).savefig(
         config.FIGURES_DIR / "spline_curve.png", dpi=150)
-    make_zoom_figure(train, estimators, final.name, col).savefig(
+    make_zoom_figure(train, fixed, final_names, col).savefig(
         config.FIGURES_DIR / "spline_curve_low_f.png", dpi=150)
     make_knot_figure(sel_df).savefig(config.FIGURES_DIR / "spline_knot_selection.png", dpi=150)
     stuck_cases = [c for c in config.STUCK_FILES if c in set(metrics_df["case"])]
     compare_df = comparison_table(metrics_df, summary_df, selected_df, estimators, stuck_cases)
     compare_df.to_csv(t / "spline_comparison.csv", index=False)
-    make_fault_free_figure(final, test, col).savefig(
-        config.FIGURES_DIR / "spline_fault_free_test.png", dpi=150)
+    for v, e in figure_est.items():
+        make_fault_free_figure(e, test, col).savefig(
+            config.FIGURES_DIR / f"spline_fault_free_test_{v}.png", dpi=150)
 
     # ---- console summary
     fmt = lambda v: f"{v:.4g}"
-    print("\nKnot selection (validation block):")
-    print(selected_df.to_string(index=False, float_format=fmt))
-    scope = "any spline" if args.allow_non_monotone_final else "splines that pass the monotone check"
-    print(f"\nFinal spline: {final.name}  (lowest validation MAE among {scope})")
+    print("\nKnot selection (validation block). lowest_val_mae_knots is the absolute minimum; "
+          "n_knots_chosen is the smallest local minimum within tolerance:")
+    show_sel = selected_df[["variant", "rule", "n_knots_chosen", "val_mae", "lowest_val_mae_knots",
+                            "lowest_val_mae", "val_mae_cost", "local_minima", "monotone", "final"]]
+    print(show_sel.to_string(index=False, float_format=fmt))
+    for v in args.variants:
+        role = "Baseline" if v == BASELINE else "Alternative"
+        print(f"\n{role} final spline: {final_est[v].name}  (lowest validation MAE of the rules tried)")
 
     wcm = metrics_df[metrics_df["group"] == "well_conditioned"].copy()
     wcm["where"] = np.where(wcm["split"] == "stuck", wcm["case"], wcm["split"])
@@ -418,10 +440,6 @@ def main(argv=None) -> int:
     if not bad.empty:
         print("\n[note] not monotone: " + ", ".join(
             f"{r.estimator} (largest drop {r.max_decrease:.3g})" for r in bad.itertuples()))
-    dropped = selected_df[selected_df["bins_dropped"] > 0]
-    if not dropped.empty:
-        print("[note] min-bin-rows guard dropped bins: " + ", ".join(
-            f"{r.estimator} ({r.bins_dropped})" for r in dropped.itertuples()))
     print("\nReminders: the validation block chose the knots and the rule; the stuck files use "
           "different weather from the fault-free run.")
     print(f"Tables written to {t}\nFigures written to {config.FIGURES_DIR}")

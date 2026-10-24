@@ -69,4 +69,4 @@ DAMPER_OCCUPIED_RULE = "fan_status"
 SETTLE = "10min"             # fan-on time before mixed air is trusted (tune on data)
 SPLIT_METHOD = "blocked"     # "blocked" or "chronological" (fault-free train/val/test)
 DIRECT_POLY_DEGREE = 2       # degree of the direct damper-from-fraction estimator
-POSITION_TOL = 0.10          # |implied - known| damper position counted as agreement
+POSITION_TOL = 0.05          # |implied - known| damper position counted as agreement
