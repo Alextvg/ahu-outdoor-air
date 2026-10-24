@@ -190,3 +190,145 @@ def test_select_n_knots_warns_when_best_is_at_the_edge():
     # 3 and 4 knots cannot follow the curve, so the largest candidate wins and is at the edge
     with pytest.warns(UserWarning, match="edge"):
         spline_model.select_n_knots(train, val, "OA_DMPR", candidates=(3, 4, 6))
+
+
+# ---- monotone variant (isotonic regression + PCHIP) ----------------------------------
+
+def test_monotone_prediction_never_decreases():
+    est = spline_model.fit_spline(curved(noise=0.08, seed=5), "OA_DMPR", n_knots=60, monotone=True)
+    grid = np.linspace(-0.3, 1.4, 4000)
+    assert np.all(np.diff(est.predict(grid)) >= -1e-12)
+
+
+def test_monotone_knot_values_are_non_decreasing_even_for_noisy_bins():
+    # Heavy noise makes raw bin medians wobble; isotonic regression must remove that.
+    noisy = spline_model.fit_spline(curved(noise=0.15, seed=3), "OA_DMPR", n_knots=40)
+    mono = spline_model.fit_spline(curved(noise=0.15, seed=3), "OA_DMPR", n_knots=40, monotone=True)
+    assert np.any(np.diff(noisy.params["y"]) < 0)              # the cubic knots do wobble
+    assert np.all(np.diff(mono.params["y"]) >= -1e-12)
+    assert np.all(np.diff(mono.params["x"]) > 0)
+
+
+def test_monotone_passes_through_its_isotonic_knots():
+    est = spline_model.fit_spline(curved(), "OA_DMPR", n_knots=15, monotone=True)
+    np.testing.assert_allclose(est.predict(est.params["x"]), est.params["y"], atol=1e-9)
+
+
+def test_monotone_does_not_overshoot_a_sharp_step():
+    est = spline_model.SplineEstimator(
+        "x", "spline", {"x": [0.0, 0.2, 0.4, 0.6, 0.8], "y": [0.0, 0.0, 1.0, 1.0, 1.0],
+                        "monotone": True}, 5)
+    pred = est.predict(np.linspace(0.0, 0.8, 400))
+    assert pred.min() >= 0.0 and pred.max() <= 1.0
+    assert np.all(np.diff(pred) >= -1e-12)
+
+
+def test_monotone_recovers_a_curved_relation_and_beats_linear():
+    df = curved()
+    mono = spline_model.fit_spline(df, "OA_DMPR", n_knots=20, monotone=True)
+    lin = damper_model.fit_direct(df, "OA_DMPR", degree=1)
+    hi = df[df["f_phys"] > 0.1]
+    assert np.abs(mono.predict(hi["f_phys"]) - hi["OA_DMPR"]).mean() < 0.03
+    assert np.abs(mono.predict(df["f_phys"]) - df["OA_DMPR"]).mean() < \
+        np.abs(lin.predict(df["f_phys"]) - df["OA_DMPR"]).mean() / 2
+
+
+def test_monotone_flag_is_recorded_in_name_and_params():
+    mono = spline_model.fit_spline(curved(), "OA_DMPR", n_knots=10, monotone=True)
+    cubic = spline_model.fit_spline(curved(), "OA_DMPR", n_knots=10)
+    assert mono.params["monotone"] is True and mono.name.startswith("monotone_spline")
+    assert cubic.params["monotone"] is False and cubic.name.startswith("cubic_spline")
+
+
+def test_monotone_keeps_nan_flat_extrapolation_and_range():
+    df = curved()
+    est = spline_model.fit_spline(df, "OA_DMPR", n_knots=20, monotone=True)
+    assert np.isnan(est.predict([np.nan, 0.5])[0])
+    x = est.params["x"]
+    lo, hi = est.predict([x[0] - 5.0, x[0] - 0.5]), est.predict([x[-1] + 0.5, x[-1] + 5.0])
+    assert lo[0] == pytest.approx(lo[1]) and hi[0] == pytest.approx(hi[1])
+    assert est.predict(np.linspace(-1, 2, 300)).min() >= df["OA_DMPR"].min() - 1e-9
+
+
+def test_old_estimators_without_the_monotone_key_still_predict():
+    est = spline_model.SplineEstimator(
+        "x", "spline", {"x": [0.0, 0.5, 1.0], "y": [0.0, 0.5, 1.0]}, 3)   # no "monotone" key
+    assert est.predict(0.25) == pytest.approx(0.25)
+
+
+def test_select_n_knots_works_for_the_monotone_variant():
+    df = curved(n=8000)
+    train, val = df.iloc[:6000], df.iloc[6000:]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        best, table = spline_model.select_n_knots(train, val, "OA_DMPR", (3, 8, 20, 60), monotone=True)
+    assert best in (3, 8, 20, 60) and best != 3
+    assert table["val_mae"].notna().all()
+
+
+# ---- minimum row guard -----------------------------------------------------------------
+
+def gappy_with_transients(n=20000, seed=0):
+    """Linear damper = f, with every real row removed from f in [0.45, 0.55] and four
+    transient rows (damper 0.1, f ~ 0.5) left alone in that gap."""
+    r = np.random.default_rng(seed)
+    f = r.uniform(0.0, 1.0, n)
+    f = f[(f < 0.45) | (f > 0.55)]
+    df = pd.DataFrame({"f_phys": f, "OA_DMPR": f, "well_conditioned": True})
+    odd = pd.DataFrame({"f_phys": [0.499, 0.500, 0.501, 0.502], "OA_DMPR": 0.1, "well_conditioned": True})
+    return pd.concat([df, odd], ignore_index=True)
+
+
+def test_guard_removes_a_bin_taken_over_by_transient_rows():
+    df = gappy_with_transients()
+    bad = spline_model.fit_spline(df, "OA_DMPR", n_knots=50, rule="uniform", min_bin_rows=0)
+    good = spline_model.fit_spline(df, "OA_DMPR", n_knots=50, rule="uniform", min_bin_rows=15)
+    assert abs(bad.predict(0.5) - 0.5) > 0.2            # the 4 transient rows pull a knot to 0.1
+    assert abs(good.predict(0.5) - 0.5) < 0.05          # spline interpolates across the gap instead
+    assert good.params["bins_dropped"] >= 1 and bad.params["bins_dropped"] == 0
+
+
+def test_guard_works_for_the_monotone_variant_too():
+    df = gappy_with_transients()
+    good = spline_model.fit_spline(df, "OA_DMPR", 50, "uniform", monotone=True, min_bin_rows=15)
+    assert abs(good.predict(0.5) - 0.5) < 0.05
+
+
+def test_guard_zero_keeps_every_bin_and_records_settings():
+    est = spline_model.fit_spline(curved(), "OA_DMPR", n_knots=20)
+    assert est.params["min_bin_rows"] == 0 and est.params["bins_dropped"] == 0
+    assert len(est.params["rows"]) == len(est.params["x"])
+    assert sum(est.params["rows"]) == est.n_train
+
+
+def test_every_kept_knot_has_at_least_the_guard_rows():
+    df = curved(n=6000)
+    est = spline_model.fit_spline(df, "OA_DMPR", n_knots=100, rule="uniform", min_bin_rows=30)
+    assert min(est.params["rows"]) >= 30
+
+
+def test_guard_barely_changes_quantile_bins():
+    # Equal-count bins all hold many rows, so a small guard removes nothing.
+    df = curved(n=6000)
+    a = spline_model.fit_spline(df, "OA_DMPR", n_knots=20, rule="quantile", min_bin_rows=0)
+    b = spline_model.fit_spline(df, "OA_DMPR", n_knots=20, rule="quantile", min_bin_rows=15)
+    assert b.params["bins_dropped"] == 0
+    np.testing.assert_allclose(a.params["y"], b.params["y"])
+
+
+def test_guard_invalid_values_raise():
+    df = curved()
+    with pytest.raises(ValueError):
+        spline_model.fit_spline(df, "OA_DMPR", n_knots=10, min_bin_rows=-1)
+    with pytest.raises(ValueError):                      # every bin removed
+        spline_model.fit_spline(df, "OA_DMPR", n_knots=10, min_bin_rows=10**6)
+
+
+def test_select_n_knots_passes_the_guard_through():
+    df = gappy_with_transients()
+    train, val = df.iloc[::2], df.iloc[1::2]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        n, table = spline_model.select_n_knots(train, val, "OA_DMPR", (10, 30, 60), rule="uniform",
+                                                min_bin_rows=15)
+    assert n in (10, 30, 60) and table["val_mae"].notna().any()

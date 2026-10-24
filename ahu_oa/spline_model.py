@@ -1,4 +1,4 @@
-"""Cubic spline estimator of damper position from the outdoor air fraction.
+"""Spline estimators of damper position from the outdoor air fraction.
 
 Method (spline interpolation): the damper position is modelled as a smooth
 function of the fraction ``f`` by a natural cubic spline.
@@ -12,11 +12,28 @@ function of the fraction ``f`` by a natural cubic spline.
    curve is a cubic polynomial; the pieces join with continuous value, slope and
    curvature, and the curvature is zero at the two ends (natural boundary).
 
+Monotone variant (``monotone=True``): a more open damper lets more outdoor air in,
+so the damper position can only rise as ``f`` rises. A natural cubic spline can
+wiggle and dip between knots, especially where the bin medians are noisy. The
+monotone variant first applies weighted isotonic regression to the knot positions
+(a least-squares fit under the constraint "never decreases", weighted by the rows
+in each bin) and then joins the knots with a PCHIP spline (piecewise cubic Hermite
+interpolation). PCHIP chooses each knot's slope so that the curve never overshoots
+or reverses between knots, so the result is smooth and monotone by construction.
+
+Minimum row guard (``min_bin_rows``): the bin median only resists the transient rows
+(damper back at its minimum while ``f`` is still high) when the bin holds many rows.
+A sparse bin can be taken over by a handful of transient rows, giving a knot far off
+the curve. Bins with fewer than ``min_bin_rows`` rows are therefore dropped before the
+spline is fitted, and the spline interpolates across the gap they leave. The guard
+matters mainly for equal-width (``uniform``) bins; equal-count (``quantile``) bins all
+hold many rows, so it rarely triggers there.
+
 Outside the range of training fractions the prediction is held flat at the end
-knot, and predictions are limited to the range of the knot positions. A cubic
-spline can overshoot between knots, so this keeps the output physical (inside the
-range seen in training) but the curve is not guaranteed to be monotone. Fewer
-knots give a smoother curve; the number is chosen by the error on the validation block.
+knot, and predictions are limited to the range of the knot positions. The cubic
+variant can overshoot between knots, so that clipping keeps its output physical
+but the curve is not guaranteed to be monotone. Fewer knots give a smoother
+curve; the number is chosen by the error on the validation block.
 
 The fitted object has the same interface as :class:`ahu_oa.damper_model.DamperEstimator`
 (``name``, ``kind``, ``params``, ``n_train``, ``predict``), so the scoring code in
@@ -30,7 +47,8 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import CubicSpline, PchipInterpolator
+from sklearn.isotonic import IsotonicRegression
 
 KNOT_RULES = ("quantile", "uniform")
 # Log-spaced knot counts. Small values show how badly a coarse spline fits, the middle
@@ -42,14 +60,17 @@ UNIFORM_TRIM = (0.5, 99.5)  # percentiles bounding the uniform knot range
 
 @dataclass
 class SplineEstimator:
-    """A fitted natural cubic spline from outdoor air fraction to damper position.
+    """A fitted spline from outdoor air fraction to damper position.
 
     Attributes:
         name: Label used in result tables.
         kind: Always ``"spline"``.
         params: ``{"x": knot fractions, "y": knot positions, "n_knots": requested
-            number of bins, "rule": knot rule}``. ``x`` is strictly increasing. The actual number of knots can be smaller than
-            ``n_knots`` if bins merge.
+            number of bins, "rule": knot rule, "monotone": bool, "min_bin_rows": the
+            guard used, "bins_dropped": bins removed by it, "rows": rows behind each
+            knot}``. ``x`` is
+            strictly increasing, and ``y`` is non-decreasing when ``monotone``. The
+            actual number of knots can be smaller than ``n_knots`` if bins merge.
         n_train: Rows used in the fit.
     """
 
@@ -63,7 +84,8 @@ class SplineEstimator:
 
         Fractions outside the knot range are held at the end knot, and the result
         is limited to the range of the knot positions, so a spline overshoot
-        between knots cannot give an impossible position.
+        between knots cannot give an impossible position. A monotone estimator
+        uses PCHIP between knots, a cubic one a natural cubic spline.
         """
         f = np.asarray(f, dtype=float)
         x = np.asarray(self.params["x"], dtype=float)
@@ -71,7 +93,10 @@ class SplineEstimator:
         out = np.full(f.shape, np.nan)
         ok = np.isfinite(f)
         if ok.any():
-            spline = CubicSpline(x, y, bc_type="natural")
+            if self.params.get("monotone", False):
+                spline = PchipInterpolator(x, y, extrapolate=False)
+            else:
+                spline = CubicSpline(x, y, bc_type="natural")
             out[ok] = np.clip(spline(np.clip(f[ok], x[0], x[-1])), y.min(), y.max())
         return out
 
@@ -89,8 +114,10 @@ def fit_spline(
     damper_col: str,
     n_knots: int = 20,
     rule: str = "quantile",
+    monotone: bool = False,
+    min_bin_rows: int = 0,
 ) -> SplineEstimator:
-    """Fit the natural cubic spline ``damper = g(f_phys)``.
+    """Fit the spline ``damper = g(f_phys)``.
 
     Args:
         train: Dataframe with ``f_phys``, ``well_conditioned`` and ``damper_col``.
@@ -101,18 +128,25 @@ def fit_spline(
             the data are dense (low fractions, damper near its minimum).
             ``"uniform"`` gives equal-width bins between the 0.5th and 99.5th
             percentile of ``f``, so sparse regions get knots too.
+        monotone: If False, a natural cubic spline through the bin medians. If True,
+            isotonic regression on the knot positions, then a PCHIP spline, so the
+            estimated position never decreases as ``f`` increases.
+        min_bin_rows: Bins with fewer rows than this are dropped before fitting (0
+            keeps every bin). See the module docstring.
 
     Returns:
         A :class:`SplineEstimator`.
 
     Raises:
-        ValueError: On an unknown ``rule``, ``n_knots < 3``, or when the data
-            give fewer than 3 distinct knots.
+        ValueError: On an unknown ``rule``, ``n_knots < 3``, a negative
+            ``min_bin_rows``, or when fewer than 3 distinct knots remain.
     """
     if rule not in KNOT_RULES:
         raise ValueError(f"unknown rule {rule!r}; use one of {KNOT_RULES}")
     if n_knots < 3:
         raise ValueError("n_knots must be at least 3")
+    if min_bin_rows < 0:
+        raise ValueError("min_bin_rows must not be negative")
     d = train[train["well_conditioned"]][["f_phys", damper_col]].dropna()
     if len(d) < 3 * n_knots:
         raise ValueError(f"need at least {3 * n_knots} rows for {n_knots} knots, got {len(d)}")
@@ -126,6 +160,9 @@ def fit_spline(
                .groupby("bin")
                .agg(x=("f", "median"), y=("y", "median"), w=("f", "size"))
                .reset_index(drop=True))
+    n_bins = len(per_bin)
+    per_bin = per_bin[per_bin["w"] >= min_bin_rows]      # minimum row guard
+    n_dropped = n_bins - len(per_bin)
     # Bins with an identical median f would give a repeated knot: merge them,
     # weighting their positions by row count.
     per_bin["wy"] = per_bin["y"] * per_bin["w"]
@@ -137,10 +174,16 @@ def fit_spline(
 
     x_k = knots["x"].to_numpy(float)
     y_k = knots["y"].to_numpy(float)
+    if monotone:
+        y_k = IsotonicRegression(increasing=True).fit_transform(
+            x_k, y_k, sample_weight=knots["w"].to_numpy(float))
+    label = "monotone_spline" if monotone else "cubic_spline"
     return SplineEstimator(
-        name=f"cubic_spline_{rule}_{len(x_k)}", kind="spline",
+        name=f"{label}_{rule}_{len(x_k)}", kind="spline",
         params={"x": [float(v) for v in x_k], "y": [float(v) for v in y_k],
-                "n_knots": int(n_knots), "rule": rule},
+                "n_knots": int(n_knots), "rule": rule, "monotone": bool(monotone),
+                "min_bin_rows": int(min_bin_rows), "bins_dropped": int(n_dropped),
+                "rows": [int(v) for v in knots["w"].to_numpy()]},
         n_train=len(d))
 
 
@@ -151,6 +194,8 @@ def select_n_knots(
     candidates=DEFAULT_KNOT_CANDIDATES,
     rule: str = "quantile",
     tolerance: float = 0.05,
+    monotone: bool = False,
+    min_bin_rows: int = 0,
 ) -> tuple[int, pd.DataFrame]:
     """Choose the number of knots by the error on the validation block.
 
@@ -170,6 +215,8 @@ def select_n_knots(
         rule: Knot rule passed to :func:`fit_spline`.
         tolerance: Relative margin over the lowest MAE that still counts as good
             enough (0.05 is 5%). Use 0 for the plain lowest-error choice.
+        monotone: Passed to :func:`fit_spline` (monotone PCHIP or cubic spline).
+        min_bin_rows: Passed to :func:`fit_spline` (minimum row guard).
 
     Returns:
         Tuple ``(chosen_n_knots, table)``. ``table`` has one row per candidate with
@@ -188,7 +235,8 @@ def select_n_knots(
     rows = []
     for k in candidates:
         try:
-            est = fit_spline(train, damper_col, n_knots=k, rule=rule)
+            est = fit_spline(train, damper_col, n_knots=k, rule=rule, monotone=monotone,
+                             min_bin_rows=min_bin_rows)
         except ValueError:
             rows.append({"n_knots": k, "val_mae": np.nan, "n_scored": 0})
             continue

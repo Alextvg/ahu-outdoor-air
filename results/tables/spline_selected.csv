@@ -1,3 +1,5 @@
-rule,estimator,n_knots_chosen,n_knots_fitted,val_mae,monotone,max_decrease,share_decreasing,final
-quantile,cubic_spline_quantile_250,250,250,0.000995377244270343,False,8.013698177289363e-05,0.08227056764191047,False
-uniform,cubic_spline_uniform_120,120,120,0.0006557318350200506,False,0.009637160304371645,0.03075768942235559,True
+variant,rule,estimator,n_knots_chosen,n_knots_fitted,min_bin_rows,bins_dropped,val_mae,monotone,max_decrease,share_decreasing,final
+cubic,quantile,cubic_spline_quantile_250,250,250,0,0,0.000995377244270343,False,8.013698177289363e-05,0.08227056764191047,False
+cubic,uniform,cubic_spline_uniform_120,120,120,0,0,0.0006557318350200506,False,0.009637160304371645,0.03075768942235559,False
+monotone,quantile,monotone_spline_quantile_250,250,250,0,0,0.000776936253894831,True,0.0,0.0,False
+monotone,uniform,monotone_spline_uniform_120,120,120,0,0,0.0007290969218346122,True,0.0,0.0,True

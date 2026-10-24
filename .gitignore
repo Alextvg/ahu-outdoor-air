@@ -13,7 +13,3 @@ __pycache__/
 data/*.csv
 data/*.zip
 !data/sample/*.csv
-
-#results
-results/figues
-results/tables
