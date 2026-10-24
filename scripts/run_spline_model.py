@@ -1,6 +1,7 @@
 """Fit and validate the spline damper estimators: position = g(f).
 
-Baseline: the natural cubic spline. Alternative: the monotone spline (isotonic regression
+Reference: the linearised inverted regression (``linear``, from ``ahu_oa.damper_model``).
+Baseline spline: the natural cubic spline. Alternative: the monotone spline (isotonic regression
 on the knot positions, then PCHIP), whose estimated position can never fall as ``f`` rises
 (see ``ahu_oa.spline_model``). Both are compared on identical data and splits.
 
@@ -59,7 +60,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 
 import config
-from ahu_oa import spline_model, splits
+from ahu_oa import damper_model, spline_model, splits
 from scripts.run_damper_model import (make_fault_free_figure, make_stuck_figure,
                                       prepare, score_estimator, stuck_detail)
 
@@ -338,6 +339,9 @@ def main(argv=None) -> int:
                                            {s_.name for s_ in splines.values()}]
     final_list = [final_est[v] for v in args.variants]
     spline_names = {e.name for e in estimators}
+    # the linear baseline (inverted linearised regression); not tuned on the validation block
+    linear = damper_model.fit_inverted(train, col)
+    estimators = [linear] + estimators
 
     # ---- fault-free validation and test blocks
     metric_rows = []
@@ -395,7 +399,7 @@ def main(argv=None) -> int:
     month_df.to_csv(t / "spline_model_stuck_by_month.csv", index=False)
     bins_df.to_csv(t / "spline_model_error_by_bin.csv", index=False)
     final_names = set()          # curve figures show the fixed uniform splines, none emphasised
-    make_curve_figure(train, fixed, final_names, stuck_points, col).savefig(
+    make_curve_figure(train, [linear] + fixed, final_names, stuck_points, col).savefig(
         config.FIGURES_DIR / "spline_curve.png", dpi=150)
     make_zoom_figure(train, fixed, final_names, col).savefig(
         config.FIGURES_DIR / "spline_curve_low_f.png", dpi=150)
