@@ -1,0 +1,312 @@
+{
+  "fault_free": {
+    "file": "AHU_annual.csv",
+    "audit": {
+      "n_rows": 525540,
+      "missing_values": {},
+      "constant_columns": [
+        "OA_Ls",
+        "SA_SPSPT_Pa",
+        "SA_TEMPSPT_C",
+        "SF_SPD"
+      ],
+      "out_of_range_0_1": {}
+    },
+    "filter_report": {
+      "n_input": 525540,
+      "n_occupied": 278682,
+      "n_complete": 278682,
+      "n_well_conditioned": 225438,
+      "coverage_well_conditioned": 0.8089435270308093,
+      "occupied_rule": "sys_ctl",
+      "min_delta": 3.0
+    },
+    "timestamps": {
+      "time_start": "2018-01-01 01:00:00",
+      "time_end": "2018-12-31 23:59:00",
+      "median_step": "0 days 00:01:00",
+      "n_duplicate_timestamps": 0,
+      "is_sorted": true
+    },
+    "columns": [
+      "CHWC_VLV",
+      "CHWC_VLV_DM",
+      "MA_TEMP_C",
+      "OA_Ls",
+      "OA_DMPR",
+      "OA_DMPR_DM",
+      "OA_TEMP_C",
+      "RA_Ls",
+      "RA_DMPR",
+      "RA_DMPR_DM",
+      "RA_TEMP_C",
+      "RF_CS",
+      "RF_SPD",
+      "RF_SPD_DM",
+      "RF_WAT",
+      "SA_Ls",
+      "SA_SP_Pa",
+      "SA_SPSPT_Pa",
+      "SA_TEMP_C",
+      "SA_TEMPSPT_C",
+      "SF_CS",
+      "SF_SPD",
+      "SF_SPD_DM",
+      "SF_WAT",
+      "SYS_CTL",
+      "ZONE_TEMP_1_C",
+      "ZONE_TEMP_2_C",
+      "ZONE_TEMP_3_C",
+      "ZONE_TEMP_4_C",
+      "ZONE_TEMP_5_C"
+    ]
+  },
+  "oa_bias_+2": {
+    "file": "oa_bias_2_annual.csv",
+    "audit": {
+      "n_rows": 525540,
+      "missing_values": {},
+      "constant_columns": [
+        "OA_Ls",
+        "SA_SPSPT_Pa",
+        "SA_TEMPSPT_C",
+        "SF_SPD"
+      ],
+      "out_of_range_0_1": {}
+    },
+    "filter_report": {
+      "n_input": 525540,
+      "n_occupied": 278640,
+      "n_complete": 278640,
+      "n_well_conditioned": 224491,
+      "coverage_well_conditioned": 0.8056668102210738,
+      "occupied_rule": "sys_ctl",
+      "min_delta": 3.0
+    },
+    "timestamps": {
+      "time_start": "2018-01-01 01:00:00",
+      "time_end": "2018-12-31 23:59:00",
+      "median_step": "0 days 00:01:00",
+      "n_duplicate_timestamps": 0,
+      "is_sorted": true
+    },
+    "columns": [
+      "CHWC_VLV",
+      "CHWC_VLV_DM",
+      "MA_TEMP_C",
+      "OA_Ls",
+      "OA_DMPR",
+      "OA_DMPR_DM",
+      "OA_TEMP_C",
+      "RA_Ls",
+      "RA_DMPR",
+      "RA_DMPR_DM",
+      "RA_TEMP_C",
+      "RF_CS",
+      "RF_SPD",
+      "RF_SPD_DM",
+      "RF_WAT",
+      "SA_Ls",
+      "SA_SP_Pa",
+      "SA_SPSPT_Pa",
+      "SA_TEMP_C",
+      "SA_TEMPSPT_C",
+      "SF_CS",
+      "SF_SPD",
+      "SF_SPD_DM",
+      "SF_WAT",
+      "SYS_CTL",
+      "ZONE_TEMP_1_C",
+      "ZONE_TEMP_2_C",
+      "ZONE_TEMP_3_C",
+      "ZONE_TEMP_4_C",
+      "ZONE_TEMP_5_C"
+    ]
+  },
+  "oa_bias_+4": {
+    "file": "oa_bias_4_annual.csv",
+    "audit": {
+      "n_rows": 525540,
+      "missing_values": {},
+      "constant_columns": [
+        "OA_Ls",
+        "SA_SPSPT_Pa",
+        "SA_TEMPSPT_C",
+        "SF_SPD"
+      ],
+      "out_of_range_0_1": {}
+    },
+    "filter_report": {
+      "n_input": 525540,
+      "n_occupied": 278640,
+      "n_complete": 278640,
+      "n_well_conditioned": 224491,
+      "coverage_well_conditioned": 0.8056668102210738,
+      "occupied_rule": "sys_ctl",
+      "min_delta": 3.0
+    },
+    "timestamps": {
+      "time_start": "2018-01-01 01:00:00",
+      "time_end": "2018-12-31 23:59:00",
+      "median_step": "0 days 00:01:00",
+      "n_duplicate_timestamps": 0,
+      "is_sorted": true
+    },
+    "columns": [
+      "CHWC_VLV",
+      "CHWC_VLV_DM",
+      "MA_TEMP_C",
+      "OA_Ls",
+      "OA_DMPR",
+      "OA_DMPR_DM",
+      "OA_TEMP_C",
+      "RA_Ls",
+      "RA_DMPR",
+      "RA_DMPR_DM",
+      "RA_TEMP_C",
+      "RF_CS",
+      "RF_SPD",
+      "RF_SPD_DM",
+      "RF_WAT",
+      "SA_Ls",
+      "SA_SP_Pa",
+      "SA_SPSPT_Pa",
+      "SA_TEMP_C",
+      "SA_TEMPSPT_C",
+      "SF_CS",
+      "SF_SPD",
+      "SF_SPD_DM",
+      "SF_WAT",
+      "SYS_CTL",
+      "ZONE_TEMP_1_C",
+      "ZONE_TEMP_2_C",
+      "ZONE_TEMP_3_C",
+      "ZONE_TEMP_4_C",
+      "ZONE_TEMP_5_C"
+    ]
+  },
+  "oa_bias_-2": {
+    "file": "oa_bias_-2_annual.csv",
+    "audit": {
+      "n_rows": 525540,
+      "missing_values": {},
+      "constant_columns": [
+        "OA_Ls",
+        "SA_SPSPT_Pa",
+        "SA_TEMPSPT_C",
+        "SF_SPD"
+      ],
+      "out_of_range_0_1": {}
+    },
+    "filter_report": {
+      "n_input": 525540,
+      "n_occupied": 278640,
+      "n_complete": 278640,
+      "n_well_conditioned": 224491,
+      "coverage_well_conditioned": 0.8056668102210738,
+      "occupied_rule": "sys_ctl",
+      "min_delta": 3.0
+    },
+    "timestamps": {
+      "time_start": "2018-01-01 01:00:00",
+      "time_end": "2018-12-31 23:59:00",
+      "median_step": "0 days 00:01:00",
+      "n_duplicate_timestamps": 0,
+      "is_sorted": true
+    },
+    "columns": [
+      "CHWC_VLV",
+      "CHWC_VLV_DM",
+      "MA_TEMP_C",
+      "OA_Ls",
+      "OA_DMPR",
+      "OA_DMPR_DM",
+      "OA_TEMP_C",
+      "RA_Ls",
+      "RA_DMPR",
+      "RA_DMPR_DM",
+      "RA_TEMP_C",
+      "RF_CS",
+      "RF_SPD",
+      "RF_SPD_DM",
+      "RF_WAT",
+      "SA_Ls",
+      "SA_SP_Pa",
+      "SA_SPSPT_Pa",
+      "SA_TEMP_C",
+      "SA_TEMPSPT_C",
+      "SF_CS",
+      "SF_SPD",
+      "SF_SPD_DM",
+      "SF_WAT",
+      "SYS_CTL",
+      "ZONE_TEMP_1_C",
+      "ZONE_TEMP_2_C",
+      "ZONE_TEMP_3_C",
+      "ZONE_TEMP_4_C",
+      "ZONE_TEMP_5_C"
+    ]
+  },
+  "oa_bias_-4": {
+    "file": "oa_bias_-4_annual.csv",
+    "audit": {
+      "n_rows": 525540,
+      "missing_values": {},
+      "constant_columns": [
+        "OA_Ls",
+        "SA_SPSPT_Pa",
+        "SA_TEMPSPT_C",
+        "SF_SPD"
+      ],
+      "out_of_range_0_1": {}
+    },
+    "filter_report": {
+      "n_input": 525540,
+      "n_occupied": 278640,
+      "n_complete": 278640,
+      "n_well_conditioned": 224491,
+      "coverage_well_conditioned": 0.8056668102210738,
+      "occupied_rule": "sys_ctl",
+      "min_delta": 3.0
+    },
+    "timestamps": {
+      "time_start": "2018-01-01 01:00:00",
+      "time_end": "2018-12-31 23:59:00",
+      "median_step": "0 days 00:01:00",
+      "n_duplicate_timestamps": 0,
+      "is_sorted": true
+    },
+    "columns": [
+      "CHWC_VLV",
+      "CHWC_VLV_DM",
+      "MA_TEMP_C",
+      "OA_Ls",
+      "OA_DMPR",
+      "OA_DMPR_DM",
+      "OA_TEMP_C",
+      "RA_Ls",
+      "RA_DMPR",
+      "RA_DMPR_DM",
+      "RA_TEMP_C",
+      "RF_CS",
+      "RF_SPD",
+      "RF_SPD_DM",
+      "RF_WAT",
+      "SA_Ls",
+      "SA_SP_Pa",
+      "SA_SPSPT_Pa",
+      "SA_TEMP_C",
+      "SA_TEMPSPT_C",
+      "SF_CS",
+      "SF_SPD",
+      "SF_SPD_DM",
+      "SF_WAT",
+      "SYS_CTL",
+      "ZONE_TEMP_1_C",
+      "ZONE_TEMP_2_C",
+      "ZONE_TEMP_3_C",
+      "ZONE_TEMP_4_C",
+      "ZONE_TEMP_5_C"
+    ]
+  }
+}

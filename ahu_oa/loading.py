@@ -1,8 +1,6 @@
 """Load LBNL single-duct AHU CSV files, convert to SI and audit data quality.
 
 Column names follow the dataset documentation (Granderson et al., 2022).
-NOTE: the name of the timestamp column has not been verified against the real
-CSV files. Pass ``time_col`` once you have checked it.
 """
 from __future__ import annotations
 
@@ -71,14 +69,6 @@ def load_ahu_csv(path: str, time_col: str | None = "Datetime") -> pd.DataFrame:
         df[time_col] = pd.to_datetime(df[time_col])
         df = df.set_index(time_col)
     return convert_to_si(df)
-
-
-def occupied_mask(df: pd.DataFrame) -> pd.Series:
-    """Return a boolean mask that is True when the system is in occupied mode.
-
-    Uses the ``SYS_CTL`` indicator (1 = occupied, 0 = unoccupied).
-    """
-    return df["SYS_CTL"] == 1
 
 
 def audit_ahu(df: pd.DataFrame, tol: float = 1e-6) -> dict:

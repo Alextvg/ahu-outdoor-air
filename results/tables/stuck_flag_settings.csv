@@ -1,0 +1,11 @@
+setting,value
+estimator,monotone_spline_uniform_45
+variant,monotone
+rule,uniform
+knots,45
+window,60min
+min_rows,20
+threshold,0.02
+threshold_chosen_by,smallest candidate with validation false alarms <= 1.0%
+max_false_alarm,0.01
+fault_free_test_mean_abs_actual_minus_command,7.62487148243773e-05

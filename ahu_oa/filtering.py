@@ -54,7 +54,7 @@ def well_conditioned_mask(df: pd.DataFrame, min_delta: float = 3.0) -> pd.Series
     """Return True where ``|T_outdoor - T_return| >= min_delta`` (K).
 
     Uses the *measured* temperatures, as an engineer in a real building would.
-    In the sensor-bias files the biased outdoor reading changes this mask.
+    In the sensor-bias files the b iased outdoor reading changes this mask.
     ``min_delta`` is a tunable placeholder; tune it on validation data only.
     """
     return (df["OA_TEMP_C"] - df["RA_TEMP_C"]).abs() >= min_delta
@@ -62,7 +62,7 @@ def well_conditioned_mask(df: pd.DataFrame, min_delta: float = 3.0) -> pd.Series
 
 def apply_filters(
     df: pd.DataFrame,
-    occupied_rule: str = "sys_ctl",
+    occupied_rule: str = "fan_status",
     required_cols=None,
     min_delta: float = 3.0,
 ):

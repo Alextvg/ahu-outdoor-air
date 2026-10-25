@@ -1,0 +1,87 @@
+DAMPER AUDIT  (min_delta 5.56 K, settle 10min)
+VERDICT: FIT WITH CAVEATS: 3 WARN
+
+FILES
+  fault_free: AHU_annual.csv, 525540 rows
+  damper_stuck_010: damper_stuck_010_annual.csv, 525540 rows
+  damper_stuck_025: damper_stuck_025_annual.csv, 525540 rows
+  damper_stuck_075: damper_stuck_075_annual.csv, 525540 rows
+  damper_stuck_100: damper_stuck_100_annual_short.csv, 308101 rows
+
+DATA
+  fault_free: 2018-01-01 to 2018-12-31, step 00:01:00, gaps 0, fan on 53%
+    usable 275652, well-conditioned 185835 (67.4%)
+    by month: 1:22788 2:20891 3:24046 4:17655 5:11546 6:8482 7:9700 8:5058 9:5742 10:18542 11:18832 12:22553
+    constant columns: OA_Ls
+    OA_DMPR: 0 to 1, std 0.304
+    OA_DMPR_DM: 0 to 1, std 0.304
+  damper_stuck_010: 2018-01-01 to 2018-12-31, step 00:01:00, gaps 0, fan on 53%
+    usable 275610, well-conditioned 186219 (67.6%)
+    by month: 1:22790 2:20890 3:24176 4:18022 5:11646 6:8560 7:10456 8:5261 9:5227 10:17938 11:18703 12:22550
+    constant columns: OA_Ls
+    OA_DMPR: 0.1 to 0.1, std 9.71e-17
+    OA_DMPR_DM: 0 to 1, std 0.388
+  damper_stuck_025: 2018-01-01 to 2018-12-31, step 00:01:00, gaps 0, fan on 53%
+    usable 275610, well-conditioned 186205 (67.6%)
+    by month: 1:22790 2:20890 3:24174 4:18048 5:11693 6:8475 7:10352 8:5187 9:5260 10:18025 11:18761 12:22550
+    constant columns: OA_Ls
+    OA_DMPR: 0.25 to 0.25, std 0
+    OA_DMPR_DM: 0 to 1, std 0.388
+  damper_stuck_075: 2018-01-01 to 2018-12-31, step 00:01:00, gaps 0, fan on 53%
+    usable 275610, well-conditioned 186744 (67.8%)
+    by month: 1:22790 2:20890 3:24291 4:18175 5:12086 6:8168 7:9767 8:4657 9:5470 10:18796 11:19104 12:22550
+    constant columns: OA_Ls
+    OA_DMPR: 0.75 to 0.75, std 0
+    OA_DMPR_DM: 0 to 1, std 0.264
+  damper_stuck_100: 2018-04-01 to 2018-11-01, step 00:01:00, gaps 0, fan on 53.4%
+    usable 162610, well-conditioned 77510 (47.7%)
+    by month: 4:18257 5:11848 6:8356 7:10187 8:5019 9:5373 10:18470
+    constant columns: OA_Ls
+    OA_DMPR: 1 to 1, std 0
+    OA_DMPR_DM: 0 to 1, std 0.177
+
+FAULT-FREE: fraction = a + b * damper (well-conditioned rows)
+  OA_DMPR: a -0.0843, b 0.929, R2 0.964, damper error ~0.069, cond 2.59
+  OA_DMPR_DM: a -0.0843, b 0.929, R2 0.964, damper error ~0.0688, cond 2.59
+
+STUCK: damper_stuck_010  (known position 0.1, from config)
+  constant column OA_DMPR at 0.1
+  fault-free rows near that position: 79412
+  fraction mean 0.0157 (sd 0.00119), expected 0.00856
+  implied position median 0.108 [IQR 0.108, 0.108], 100% within +-0.1
+  vs fault-free at 263695 shared times: mixed-air shift 2.84 K, OA temp identical 35%
+
+STUCK: damper_stuck_025  (known position 0.25, from config)
+  constant column OA_DMPR at 0.25
+  fault-free rows near that position: 147
+  fraction mean 0.0437 (sd 0.00116), expected 0.148
+  implied position median 0.138 [IQR 0.138, 0.138], 0.0269% within +-0.1
+  vs fault-free at 263695 shared times: mixed-air shift 2.61 K, OA temp identical 35%
+
+STUCK: damper_stuck_075  (known position 0.75, from config)
+  constant column OA_DMPR at 0.75
+  fault-free rows near that position: 16991
+  fraction mean 0.675 (sd 0.00144), expected 0.612
+  implied position median 0.818 [IQR 0.817, 0.818], 100% within +-0.1
+  vs fault-free at 263695 shared times: mixed-air shift -3.35 K, OA temp identical 35%
+
+STUCK: damper_stuck_100  (known position 1, from config)
+  constant column OA_DMPR at 1
+  fault-free rows near that position: 22927
+  fraction mean 1 (sd 0.00284), expected 0.844
+  implied position median 1.17 [IQR 1.17, 1.17], 0% within +-0.1
+  vs fault-free at 152011 shared times: mixed-air shift 0.396 K, OA temp identical 30.8%
+
+CHECKS: 40 PASS
+  [WARN] damper_stuck_025: training covers stuck position: 147 fault-free well-conditioned rows within +-0.05 of 0.25
+  [WARN] damper_stuck_025: implied position matches known: median 0.138 vs 0.25 (dev 0.112)
+  [WARN] damper_stuck_100: implied position matches known: median 1.167 vs 1.0 (dev 0.167)
+  [INFO] fault_free: outdoor flow constant: OA flow cannot be ground truth; design does not use it
+  [INFO] damper_stuck_010: outdoor flow constant: OA flow cannot be ground truth; design does not use it
+  [INFO] damper_stuck_025: outdoor flow constant: OA flow cannot be ground truth; design does not use it
+  [INFO] damper_stuck_075: outdoor flow constant: OA flow cannot be ground truth; design does not use it
+  [INFO] damper_stuck_100: outdoor flow constant: OA flow cannot be ground truth; design does not use it
+  [INFO] damper_stuck_010: weather matches fault-free: weather differs from fault-free, so differences mix fault and weather
+  [INFO] damper_stuck_025: weather matches fault-free: weather differs from fault-free, so differences mix fault and weather
+  [INFO] damper_stuck_075: weather matches fault-free: weather differs from fault-free, so differences mix fault and weather
+  [INFO] damper_stuck_100: weather matches fault-free: weather differs from fault-free, so differences mix fault and weather

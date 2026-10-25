@@ -32,8 +32,3 @@ def test_audit_flags_constant_and_out_of_range():
     report = loading.audit_ahu(loading.convert_to_si(make_df()))
     assert "SF_SPD" in report["constant_columns"]
     assert report["out_of_range_0_1"] == {"CHWC_VLV": 1}
-
-
-def test_occupied_mask():
-    mask = loading.occupied_mask(make_df())
-    assert mask.tolist() == [False, True]

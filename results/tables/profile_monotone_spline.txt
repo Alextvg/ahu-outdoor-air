@@ -1,0 +1,23 @@
+         227555 function calls (223315 primitive calls) in 0.501 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1041 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.501    0.501 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\scripts\run_timing.py:271(<lambda>)
+        1    0.002    0.002    0.501    0.501 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\scripts\run_timing.py:108(run)
+       12    0.017    0.001    0.475    0.040 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\ahu_oa\spline_model.py:113(fit_spline)
+        1    0.004    0.004    0.457    0.457 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\ahu_oa\spline_model.py:207(select_n_knots)
+       24    0.001    0.000    0.212    0.009 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\groupby\generic.py:1420(aggregate)
+      263    0.002    0.000    0.154    0.001 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\frame.py:4073(__getitem__)
+       50    0.000    0.000    0.140    0.003 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\generic.py:4164(_take_with_is_copy)
+       51    0.001    0.000    0.137    0.003 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\generic.py:4049(take)
+       24    0.000    0.000    0.136    0.006 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\apply.py:172(agg)
+       24    0.000    0.000    0.136    0.006 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\apply.py:415(agg_dict_like)
+       24    0.001    0.000    0.136    0.006 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\apply.py:1570(agg_or_apply_dict_like)
+       51    0.000    0.000    0.135    0.003 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\internals\managers.py:888(take)
+       13    0.000    0.000    0.126    0.010 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\frame.py:4141(_getitem_bool_array)
+       51    0.000    0.000    0.123    0.002 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\internals\managers.py:642(reindex_indexer)
+      331    0.001    0.000    0.121    0.000 C:\Users\alexg\Downloads\ahu-outdoor-air\ahu-outdoor-air\.venv\lib\site-packages\pandas\core\array_algos\take.py:59(take_nd)
+
+
