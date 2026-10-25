@@ -1,4 +1,4 @@
-"""Noise sensitivity test for the cubic (baseline) and monotone (alternative) splines.
+"""Noise sensitivity test for the logistic curve (baseline) and the cubic and monotone splines (alternatives).
 
 The model input f comes from three temperature sensors:
     f = (T_mixed - T_return) / (T_outdoor - T_return)
@@ -8,7 +8,8 @@ temperatures) and measures how the damper error grows. The data already carry wh
 the simulation put in, so sigma is ADDED noise on top of that, and sigma = 0 is the
 unmodified data.
 
-Three experiments are run, each for the linear baseline and both splines (fixed knot count):
+Three experiments are run, each for the logistic baseline (``ahu_oa.parametric_model``, two
+parameters, fixed fit settings) and both splines (fixed knot count):
   test_noise   Fit on clean train rows, add noise to the test block only.
                Question: how does the finished model cope with noisy sensors in use?
   train_noise  Fit on noisy train rows, score on the clean test block.
@@ -41,10 +42,10 @@ import numpy as np
 import pandas as pd
 
 import config
-from ahu_oa import damper_model, metrics, physics, spline_model, splits
+from ahu_oa import metrics, parametric_model, physics, spline_model, splits
 from scripts.run_damper_model import prepare
 
-VARIANTS = ("linear", "cubic", "monotone")      # linear reference, cubic baseline, monotone alternative
+VARIANTS = ("logistic", "cubic", "monotone")      # logistic physical baseline; cubic and monotone splines
 EXPERIMENTS = ("test_noise", "train_noise", "both_noise")
 TEMP_COLS = ("MA_TEMP_C", "RA_TEMP_C", "OA_TEMP_C")      # mixed, return, outdoor
 # Title 24 (California Energy Code) requires economizer FDD temperature sensors accurate to
@@ -73,7 +74,7 @@ def add_noise(df: pd.DataFrame, sigma: float, rng: np.random.Generator,
     out = df.copy()
     noisy = {c: df[c].to_numpy(float) + (rng.normal(0.0, sigma, len(df)) if sigma > 0 else 0.0)
              for c in TEMP_COLS}
-    for c in TEMP_COLS:                       # the linear baseline is fitted from the temperatures
+    for c in TEMP_COLS:                       # keep the temperature columns consistent with f_phys
         out[c] = noisy[c]
     out["f_phys"] = physics.oa_fraction_from_temps(
         noisy["MA_TEMP_C"], noisy["RA_TEMP_C"], noisy["OA_TEMP_C"], min_delta=min_delta)
@@ -82,15 +83,15 @@ def add_noise(df: pd.DataFrame, sigma: float, rng: np.random.Generator,
 
 
 def score(est, test: pd.DataFrame, col: str) -> dict:
-    """MAE, RMSE, bias and coverage of one spline on one (possibly noisy) test block."""
+    """MAE, RMSE, bias and coverage of one fitted model on one (possibly noisy) test block."""
     pred = est.predict(test["f_phys"].to_numpy(float))
     return metrics.error_summary(test[col].to_numpy(float), pred)
 
 
 def fit_variant(variant: str, train: pd.DataFrame, col: str, n_knots: int, rule: str):
-    """Fit one method: the linear reference or a (cubic / monotone) spline."""
-    if variant == "linear":
-        return damper_model.fit_inverted(train, col)
+    """Fit one method: the logistic baseline or a (cubic / monotone) spline."""
+    if variant == "logistic":
+        return parametric_model.fit_logistic(train, col)
     return spline_model.fit_spline(train, col, n_knots=n_knots, rule=rule,
                                    monotone=variant == "monotone")
 
@@ -135,8 +136,8 @@ def summarise(runs: pd.DataFrame) -> pd.DataFrame:
 def make_figure(summary: pd.DataFrame, n_knots: int) -> plt.Figure:
     """MAE against added noise for the three experiments, plus coverage."""
     fig, axes = plt.subplots(1, 4, figsize=(17, 4.2))
-    colour = {"linear": "tab:gray", "cubic": "tab:blue", "monotone": "tab:green"}
-    style = {"linear": ("s", "-"), "cubic": ("o", "-"), "monotone": ("^", "--")}
+    colour = {"logistic": "crimson", "cubic": "tab:blue", "monotone": "tab:green"}
+    style = {"logistic": ("s", "-"), "cubic": ("o", "-"), "monotone": ("^", "--")}
     titles = {"test_noise": "Noise in test data only\n(model fitted on clean data)",
               "train_noise": "Noise in training data only\n(scored on clean test data)",
               "both_noise": "Noise in both"}
@@ -146,7 +147,7 @@ def make_figure(summary: pd.DataFrame, n_knots: int) -> plt.Figure:
             mk, ls = style[v]
             ax.errorbar(d["sigma_K"], d["mae_mean"], yerr=d["mae_sd"], marker=mk, linestyle=ls,
                         capsize=3, color=colour[v],
-                        label="linear baseline" if v == "linear" else f"{v} spline")
+                        label="logistic baseline" if v == "logistic" else f"{v} spline")
         ax.set_title(titles[name], fontsize=10)
         ax.set_xlabel("added noise sigma per temperature (K)")
         ax.set_ylabel("test MAE (damper units)")
@@ -166,7 +167,7 @@ def make_figure(summary: pd.DataFrame, n_knots: int) -> plt.Figure:
     axes[3].set_ylabel("coverage")
     axes[3].set_ylim(0, 1.02)
     axes[3].grid(alpha=0.3)
-    fig.suptitle(f"Noise sensitivity: linear baseline and {n_knots}-knot uniform splines", y=1.02)
+    fig.suptitle(f"Noise sensitivity: logistic baseline and {n_knots}-knot uniform splines", y=1.02)
     fig.tight_layout()
     return fig
 

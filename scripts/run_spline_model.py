@@ -1,7 +1,10 @@
 """Fit and validate the spline damper estimators: position = g(f).
 
-Reference: the linearised inverted regression (``linear``, from ``ahu_oa.damper_model``).
-Baseline spline: the natural cubic spline. Alternative: the monotone spline (isotonic regression
+Also scored: ``logistic_curve``, a two-parameter physical damper curve (``ahu_oa.parametric_model``)
+whose fit method and range are tuned on the validation block and whose parameters are checked
+for stability across time blocks. It is drawn on the main curve figures.
+
+Baseline: the natural cubic spline. Alternative: the monotone spline (isotonic regression
 on the knot positions, then PCHIP), whose estimated position can never fall as ``f`` rises
 (see ``ahu_oa.spline_model``). Both are compared on identical data and splits.
 
@@ -60,7 +63,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 
 import config
-from ahu_oa import damper_model, spline_model, splits
+from ahu_oa import parametric_model, spline_model, splits
 from scripts.run_damper_model import (make_fault_free_figure, make_stuck_figure,
                                       prepare, score_estimator, stuck_detail)
 
@@ -140,6 +143,9 @@ def make_curve_figure(train: pd.DataFrame, estimators, final_names,
     styles = ["--", ":", "-", "-."]
     for i, e in enumerate(estimators):
         final = e.name in final_names
+        if e.kind == "parametric":      # the physical curve stands out from the splines
+            ax.plot(grid, e.predict(grid), "-", color="crimson", linewidth=2.6, label=e.name)
+            continue
         ax.plot(grid, e.predict(grid), styles[i % len(styles)], linewidth=2.6 if final else 1.4,
                 label=e.name + (" (final)" if final else ""))
         if e.kind == "spline" and final:
@@ -176,6 +182,9 @@ def make_zoom_figure(train: pd.DataFrame, estimators, final_names, col: str,
     fig.colorbar(hb, ax=ax, label="fault-free training rows (log scale)")
     grid = np.linspace(-0.01, f_max, 600)
     for e in estimators:
+        if e.kind == "parametric":
+            ax.plot(grid, e.predict(grid), "-", color="crimson", linewidth=2.6, label=e.name)
+            continue
         if e.kind != "spline":
             continue
         final = e.name in final_names
@@ -185,7 +194,7 @@ def make_zoom_figure(train: pd.DataFrame, estimators, final_names, col: str,
     ax.set_ylim(-0.02, 1.02)
     ax.set_xlabel("Outdoor air fraction f (calculated)")
     ax.set_ylabel(f"Damper position ({col})")
-    ax.set_title("Small-f region: cubic (dashed) and monotone (solid) splines")
+    ax.set_title("Small-f region: cubic (dashed) and monotone (solid) splines, logistic (red)")
     ax.legend(loc="lower right", fontsize=8)
     fig.tight_layout()
     return fig
@@ -335,13 +344,12 @@ def main(argv=None) -> int:
     # the splines drawn in the fault-free test and stuck-file figures: uniform knots, fixed count
     figure_est = {v: spline_model.fit_spline(train, col, n_knots=args.figure_knots, rule="uniform",
                                              monotone=v == ALTERNATIVE) for v in args.variants}
-    estimators = list(splines.values()) + [e for e in fixed if e.name not in
-                                           {s_.name for s_ in splines.values()}]
+    # two-parameter logistic damper curve: fit method and range chosen on validation, train-only fit
+    logistic, logistic_sel = parametric_model.select_logistic(train, val, col)
+    estimators = [logistic] + list(splines.values()) + [e for e in fixed if e.name not in
+                                                       {s_.name for s_ in splines.values()}]
     final_list = [final_est[v] for v in args.variants]
     spline_names = {e.name for e in estimators}
-    # the linear baseline (inverted linearised regression); not tuned on the validation block
-    linear = damper_model.fit_inverted(train, col)
-    estimators = [linear] + estimators
 
     # ---- fault-free validation and test blocks
     metric_rows = []
@@ -389,6 +397,14 @@ def main(argv=None) -> int:
 
     # ---- write everything
     t = config.TABLES_DIR
+    logistic_sel.to_csv(t / "logistic_selection.csv", index=False)
+    # stability: the same settings refitted on each time block separately
+    lg = logistic.params
+    stab = []
+    for name, blk in (("train", train), ("val", val), ("test", test)):
+        e_b = parametric_model.fit_logistic(blk, col, fit_range=lg["fit_range"], method=lg["method"])
+        stab.append({"block": name, "n_rows": e_b.n_train, "a": e_b.params["a"], "b": e_b.params["b"]})
+    pd.DataFrame(stab).to_csv(t / "logistic_stability.csv", index=False)
     sel_df.to_csv(t / "spline_knot_selection.csv", index=False)
     selected_df.to_csv(t / "spline_selected.csv", index=False)
     pd.concat([pd.DataFrame({"estimator": e.name, "variant": v, "rule": r, "f": e.params["x"],
@@ -399,9 +415,9 @@ def main(argv=None) -> int:
     month_df.to_csv(t / "spline_model_stuck_by_month.csv", index=False)
     bins_df.to_csv(t / "spline_model_error_by_bin.csv", index=False)
     final_names = set()          # curve figures show the fixed uniform splines, none emphasised
-    make_curve_figure(train, [linear] + fixed, final_names, stuck_points, col).savefig(
+    make_curve_figure(train, [logistic] + fixed, final_names, stuck_points, col).savefig(
         config.FIGURES_DIR / "spline_curve.png", dpi=150)
-    make_zoom_figure(train, fixed, final_names, col).savefig(
+    make_zoom_figure(train, [logistic] + fixed, final_names, col).savefig(
         config.FIGURES_DIR / "spline_curve_low_f.png", dpi=150)
     make_knot_figure(sel_df).savefig(config.FIGURES_DIR / "spline_knot_selection.png", dpi=150)
     stuck_cases = [c for c in config.STUCK_FILES if c in set(metrics_df["case"])]
@@ -413,6 +429,10 @@ def main(argv=None) -> int:
 
     # ---- console summary
     fmt = lambda v: f"{v:.4g}"
+    print(f"Logistic curve: logit(f) = {lg['a']:.3f} + {lg['b']:.3f} * position  "
+          f"(method {lg['method']}, fit range {lg['fit_range'][0]:g}-{lg['fit_range'][1]:g}, chosen on validation)")
+    print("Logistic stability (same settings refitted per block; similar a, b = stable):")
+    print(pd.DataFrame(stab).to_string(index=False, float_format=fmt))
     print("\nKnot selection (validation block). lowest_val_mae_knots is the absolute minimum; "
           "n_knots_chosen is the smallest local minimum within tolerance:")
     show_sel = selected_df[["variant", "rule", "n_knots_chosen", "val_mae", "lowest_val_mae_knots",

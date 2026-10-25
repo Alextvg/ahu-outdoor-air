@@ -18,7 +18,8 @@ Estimator. The curve is turned around to give the position from ``f``:
     position = (logit(f) - a) / b.
 
 ``a`` and ``b`` come from least squares of the position on ``logit(f)`` over the
-training rows (the same quantity the other models are scored on, the position
+training rows (``method="inverse"``; ``"forward"`` fits ``f`` itself, see ``fit_logistic``;
+``select_logistic`` picks the method and fit range on the validation block) (the same quantity the other models are scored on, the position
 error), then are re-expressed as ``a = -c0 / c1``, ``b = 1 / c1``. Two numbers
 describe the whole model, and ``b`` has a meaning: how fast the flow ratio changes
 with opening (the damper's exponential characteristic).
@@ -39,9 +40,13 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import least_squares
 
 F_LO, F_HI = 0.002, 0.998          # clip before the logit
 FIT_RANGE = (0.005, 0.97)          # rows with f in this range are used for the fit
+METHODS = ("inverse", "forward")
+DEFAULT_LOWS = (0.002, 0.005, 0.01, 0.02)      # candidate lower ends of the fit range
+DEFAULT_HIGHS = (0.90, 0.95, 0.97, 0.99, 1.0)  # candidate upper ends of the fit range
 
 
 def logit(f) -> np.ndarray:
@@ -75,33 +80,92 @@ class LogisticEstimator:
         return np.where(np.isfinite(f), out, np.nan)
 
 
-def fit_logistic(train: pd.DataFrame, damper_col: str, fit_range=FIT_RANGE) -> LogisticEstimator:
+def fit_logistic(train: pd.DataFrame, damper_col: str, fit_range=FIT_RANGE,
+                 method: str = "inverse") -> LogisticEstimator:
     """Fit the two-parameter curve on well-conditioned training rows.
 
     Args:
         train: Dataframe with ``f_phys``, ``well_conditioned`` and ``damper_col``.
         damper_col: Column holding the true damper position.
-        fit_range: ``(low, high)``; only rows with ``f_phys`` in this range are used.
+        fit_range: ``(low, high)``; with ``method="inverse"`` only rows with ``f_phys``
+            in this range are used.
+        method: ``"inverse"`` regresses position on ``logit(f)`` (minimises position
+            error, the quantity scored). ``"forward"`` fits ``f = sigmoid(a + b *
+            position)`` by robust nonlinear least squares on all rows (soft-L1 loss,
+            so the lag rows with high ``f`` at a low position count less), then
+            inverts it. The forward fit is the physical model taken literally; it is
+            weighted towards large ``f``, where the curve is steep.
 
     Returns:
         A :class:`LogisticEstimator`.
 
     Raises:
-        ValueError: If fewer than 10 rows qualify or the logit of ``f`` does not
-            vary (so the slope cannot be found), or the fitted slope is not positive.
+        ValueError: On an unknown ``method``, fewer than 10 rows, a logit of ``f``
+            that does not vary, or a fitted slope that is not positive.
     """
+    if method not in METHODS:
+        raise ValueError(f"unknown method {method!r}; use one of {METHODS}")
     d = train[train["well_conditioned"]][["f_phys", damper_col]].dropna()
-    d = d[(d["f_phys"] >= fit_range[0]) & (d["f_phys"] <= fit_range[1])]
+    if method == "inverse":
+        d = d[(d["f_phys"] >= fit_range[0]) & (d["f_phys"] <= fit_range[1])]
     if len(d) < 10:
-        raise ValueError(f"only {len(d)} rows with f in {fit_range}; cannot fit")
-    z = logit(d["f_phys"].to_numpy(float))
+        raise ValueError(f"only {len(d)} usable rows; cannot fit")
     x = d[damper_col].to_numpy(float)
+    f = d["f_phys"].to_numpy(float)
+    z = logit(f)
     if np.ptp(z) == 0:
         raise ValueError("logit(f) does not vary; cannot fit a slope")
     c1, c0 = np.polyfit(z, x, 1)           # position = c0 + c1 * logit(f)
     if c1 <= 0:
         raise ValueError("position does not rise with f in the training rows; check the data")
+    a, b = -c0 / c1, 1.0 / c1
+    if method == "forward":
+        fc = np.clip(f, 0.0, 1.0)
+        sol = least_squares(lambda p: 1.0 / (1.0 + np.exp(-(p[0] + p[1] * x))) - fc,
+                            x0=[a, b], loss="soft_l1", f_scale=0.05)
+        a, b = float(sol.x[0]), float(sol.x[1])
+        if b <= 0:
+            raise ValueError("forward fit gave a non-positive slope; check the data")
     return LogisticEstimator(
         name="logistic_curve", kind="parametric",
-        params={"a": float(-c0 / c1), "b": float(1.0 / c1), "fit_range": tuple(fit_range)},
+        params={"a": float(a), "b": float(b), "fit_range": tuple(fit_range), "method": method},
         n_train=len(d))
+
+
+def select_logistic(train: pd.DataFrame, val: pd.DataFrame, damper_col: str,
+                    lows=DEFAULT_LOWS, highs=DEFAULT_HIGHS, methods=METHODS):
+    """Choose the fit settings (method and fit range) by validation error.
+
+    Every combination is fitted on ``train`` and scored on the well-conditioned rows
+    of ``val`` (mean absolute position error). The forward method ignores the range, so
+    it is tried once. The test block and stuck files are not used.
+
+    Returns:
+        Tuple ``(best_estimator, table)``; ``table`` has one row per combination with
+        ``method``, ``low``, ``high``, ``a``, ``b``, ``val_mae`` and ``chosen``.
+
+    Raises:
+        ValueError: If no combination could be fitted.
+    """
+    held = val[val["well_conditioned"]]
+    truth = held[damper_col].to_numpy(float)
+    rows, fits = [], []
+    for m in methods:
+        ranges = [(np.nan, np.nan)] if m == "forward" else [(lo, hi) for lo in lows for hi in highs if lo < hi]
+        for lo, hi in ranges:
+            try:
+                est = fit_logistic(train, damper_col, fit_range=(lo, hi) if m == "inverse" else FIT_RANGE,
+                                   method=m)
+            except ValueError:
+                continue
+            err = np.abs(est.predict(held["f_phys"].to_numpy(float)) - truth)
+            err = err[np.isfinite(err)]
+            rows.append({"method": m, "low": lo, "high": hi, "a": est.params["a"], "b": est.params["b"],
+                         "val_mae": float(err.mean()) if err.size else np.nan})
+            fits.append(est)
+    table = pd.DataFrame(rows)
+    if table.empty or table["val_mae"].isna().all():
+        raise ValueError("no logistic fit could be scored; check the data")
+    best = int(table["val_mae"].idxmin())
+    table["chosen"] = table.index == best
+    return fits[best], table

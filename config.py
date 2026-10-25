@@ -35,7 +35,7 @@ TIME_COL = "Datetime"
 
 # ---- Filtering and baseline settings ---------------------------------------
 OCCUPIED_RULE = "sys_ctl"   # or "fan_status"; compare both in the audit
-MIN_DELTA_K = 3.0           # |T_outdoor - T_return| below this is "ill-conditioned"
+MIN_DELTA_K = 5.56           # |T_outdoor - T_return| below this is "ill-conditioned"
 
 # ---- Compliance check (ASHRAE 62.1 ventilation rate procedure) -------------
 FLOOR_AREA_M2 = 3563.0      # from the dataset documentation (check it)
